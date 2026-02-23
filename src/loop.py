@@ -19,6 +19,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 def loop(
     prompt: str,
     provider: str = "claude",
+    model: str | None = None,
     timeout: int = 900,
     max_wait: int = 3600,
     workspace: str | None = None,
@@ -55,9 +56,9 @@ def loop(
             monitor.wait_if_needed()
 
             if iteration > 1 and session_id:
-                cmd = build_cmd(provider, current_prompt, session_id=session_id)
+                cmd = build_cmd(provider, current_prompt, session_id=session_id, model=model)
             else:
-                cmd = build_cmd(provider, current_prompt)
+                cmd = build_cmd(provider, current_prompt, model=model)
 
             print(f"\n>> iteration {iteration}" + (f" (session: {session_id[:20]}...)" if session_id else ""))
             logger.iteration_start(iteration, cmd)

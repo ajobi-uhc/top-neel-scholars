@@ -11,7 +11,7 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
-def build_cmd(provider: str, prompt: str, session_id: str | None = None) -> list[str]:
+def build_cmd(provider: str, prompt: str, session_id: str | None = None, model: str | None = None) -> list[str]:
     preamble = (PROMPTS_DIR / "worker_preamble.md").read_text()
     full_prompt = preamble + "\n" + prompt
 
@@ -22,6 +22,8 @@ def build_cmd(provider: str, prompt: str, session_id: str | None = None) -> list
             "--output-format", "json",
             "--verbose",
         ]
+        if model:
+            cmd += ["--model", model]
         if session_id:
             cmd += ["--resume", session_id]
         cmd += ["-p", full_prompt]
