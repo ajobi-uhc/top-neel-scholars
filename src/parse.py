@@ -3,19 +3,11 @@
 Pure functions, no side effects.
 """
 
+import glob
 import json
+import os
 import re
-
-SESSION_LIMIT_PATTERNS = [
-    re.compile(p, re.IGNORECASE)
-    for p in [
-        r"usage limit",
-        r"5.hour.*limit",
-        r"limit.*reached.*try.*back",
-        r"usage.*limit.*reached",
-        r"quota exceeded",
-    ]
-]
+from pathlib import Path
 
 INPUT_PATTERNS = [
     re.compile(p, re.IGNORECASE)
@@ -27,34 +19,6 @@ INPUT_PATTERNS = [
         r"waiting for .* input",
     ]
 ]
-
-
-def detect_rate_limit(output: str) -> bool:
-    """Check for rate_limit_event with status 'rejected' in Claude CLI JSON output."""
-    for line in output.splitlines():
-        if '"rate_limit_event"' in line:
-            try:
-                obj = json.loads(line)
-                if not isinstance(obj, dict):
-                    continue
-                event = obj.get("rate_limit_event", {})
-                if event.get("status") == "rejected":
-                    return True
-            except json.JSONDecodeError:
-                if "rejected" in line:
-                    return True
-    return False
-
-
-def detect_session_limit(output: str) -> bool:
-    """Check for 5-hour usage cap / session limits via text patterns.
-    Only checks last 30 lines, excluding tool result echoes."""
-    tail = "\n".join(output.splitlines()[-30:])
-    filtered = "\n".join(
-        line for line in tail.splitlines()
-        if '"tool_result"' not in line and '"tool_use_id"' not in line
-    )
-    return any(p.search(filtered) for p in SESSION_LIMIT_PATTERNS)
 
 
 def detect_asking_input(output: str) -> bool:
@@ -114,6 +78,26 @@ def extract_session_id(output: str) -> str | None:
                     if sid:
                         return sid
     except json.JSONDecodeError:
+        pass
+    return None
+
+
+def extract_codex_session_id() -> str | None:
+    """Extract session ID from the most recent Codex session JSONL file."""
+    sessions_dir = str(Path.home() / ".codex" / "sessions")
+    pattern = os.path.join(sessions_dir, "**", "rollout-*.jsonl")
+    files = glob.glob(pattern, recursive=True)
+    if not files:
+        return None
+    latest = max(files, key=os.path.getmtime)
+    try:
+        with open(latest) as f:
+            first_line = f.readline().strip()
+            if first_line:
+                obj = json.loads(first_line)
+                if obj.get("type") == "session_meta":
+                    return obj.get("payload", {}).get("id")
+    except (json.JSONDecodeError, OSError):
         pass
     return None
 
