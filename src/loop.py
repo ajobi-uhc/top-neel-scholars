@@ -11,7 +11,7 @@ from src.parse import (
 )
 from src.process import build_cmd, run_once
 from src.rate_monitor import RateMonitor
-from src.status import run_feedback_agent, write_status
+from src.status import find_latest_checkpoint, read_all_feedback, run_feedback_agent_cc, write_status
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -34,7 +34,6 @@ def loop(
     logger = Logger(ws_str)
     session_id = None
     iteration = 0
-    current_prompt = prompt
 
     monitor = RateMonitor(
         provider=provider,
@@ -55,10 +54,24 @@ def loop(
 
             monitor.wait_if_needed()
 
-            if iteration > 1 and session_id:
-                cmd = build_cmd(provider, current_prompt, session_id=session_id, model=model)
+            # Build prompt: first iteration uses original task, subsequent use template
+            if iteration == 1:
+                current_prompt = prompt
             else:
-                cmd = build_cmd(provider, current_prompt, model=model)
+                progress_path = find_latest_checkpoint(ws_str, "progress")
+                feedback_path = find_latest_checkpoint(ws_str, "feedback")
+                if progress_path and feedback_path:
+                    progress_content = progress_path.read_text()
+                    feedback_content = feedback_path.read_text()
+                    template = (PROMPTS_DIR / "continue_with_feedback.md").read_text()
+                    current_prompt = (template
+                        .replace("{progress_content}", progress_content)
+                        .replace("{feedback_content}", feedback_content)
+                        .replace("{original_task}", prompt))
+                else:
+                    current_prompt = prompt
+
+            cmd = build_cmd(provider, current_prompt, model=model)
 
             print(f"\n>> iteration {iteration}" + (f" (session: {session_id[:20]}...)" if session_id else ""))
             logger.iteration_start(iteration, cmd)
@@ -102,7 +115,7 @@ def loop(
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
                 continue
 
-            # Success — extract session ID for resume
+            # Success — extract session ID for logging
             if provider == "claude":
                 new_sid = extract_session_id(raw_output)
                 if new_sid:
@@ -115,21 +128,35 @@ def loop(
             print("  ok")
             logger.event("iteration ok")
 
-            status_path = write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
+            write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
 
-            print("  running feedback agent...")
-            logger.event("running feedback agent")
-            feedback = run_feedback_agent(ws_str, status_path)
-
-            if feedback:
-                print(f"  feedback: {feedback[:200]}{'...' if len(feedback) > 200 else ''}")
-                logger.event(f"feedback: {feedback}")
-                template = (PROMPTS_DIR / "continue_with_feedback.md").read_text()
-                current_prompt = template.replace("{feedback}", feedback).replace("{original_task}", prompt)
+            # Find the progress file the worker just wrote
+            progress_path = find_latest_checkpoint(ws_str, "progress")
+            if progress_path:
+                print(f"  progress file: {progress_path.name}")
+                progress_content = progress_path.read_text()
             else:
-                print("  no feedback")
-                logger.event("no feedback from agent")
-                current_prompt = "continue"
+                print("  warning: no progress file found in checkpoints/")
+                progress_content = ""
+
+            # Gather feedback history and run feedback agent
+            feedback_history = read_all_feedback(ws_str)
+
+            print("  running feedback agent (Claude Code)...")
+            logger.event("running feedback agent (Claude Code)")
+            feedback_path = run_feedback_agent_cc(
+                ws_str,
+                original_task=prompt,
+                progress_content=progress_content,
+                feedback_history=feedback_history,
+            )
+
+            if feedback_path:
+                print(f"  feedback written to: {feedback_path.name}")
+                logger.event(f"feedback written to: {feedback_path}")
+            else:
+                print("  no feedback file produced")
+                logger.event("no feedback file from agent")
 
     except KeyboardInterrupt:
         print(f"\n\nStopped after {iteration} iterations.")

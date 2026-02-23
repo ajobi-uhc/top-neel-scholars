@@ -11,7 +11,7 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
-def build_cmd(provider: str, prompt: str, session_id: str | None = None, model: str | None = None) -> list[str]:
+def build_cmd(provider: str, prompt: str, model: str | None = None) -> list[str]:
     preamble = (PROMPTS_DIR / "worker_preamble.md").read_text()
     full_prompt = preamble + "\n" + prompt
 
@@ -24,13 +24,9 @@ def build_cmd(provider: str, prompt: str, session_id: str | None = None, model: 
         ]
         if model:
             cmd += ["--model", model]
-        if session_id:
-            cmd += ["--resume", session_id]
         cmd += ["-p", full_prompt]
         return cmd
     elif provider == "codex":
-        if session_id:
-            return ["codex", "exec", "resume", session_id, full_prompt, "--dangerously-bypass-approvals-and-sandbox"]
         return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", full_prompt]
     else:
         raise ValueError(f"Unknown provider: {provider}")

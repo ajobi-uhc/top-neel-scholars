@@ -22,25 +22,23 @@ The `context/` folder contains background materials you can consult as needed:
 
 ## Workflow — RALPH Loop
 
-You operate in an automated **RALPH loop** — a cycle of agent iterations with feedback. Here's how it works:
+You operate in an automated **RALPH loop** — a cycle of fresh worker iterations with feedback. Each worker starts from scratch with context injected into its prompt.
 
-1. **Each session**, you pick up from the status and feedback left by the previous iteration. Check `status/` for the most recent `status_<timestamp>.md` and its corresponding feedback.
-2. **Work autonomously.** Never ask for user input or clarification. Make your best judgment on any decision and proceed.
-3. **When you're done** with the current iteration, write a status file at `status/status_<timestamp>.md` summarizing:
-   - What you accomplished
-   - What files you changed
-   - Any issues encountered
-   - What you think should be done next
-4. Then output `DONE` on its own line.
+1. **First iteration:** You receive the original task directly. Start from `initial_plan.md` and begin working on the first milestone.
+2. **Subsequent iterations:** You receive a prompt containing:
+   - The **progress report** from the previous iteration (your only memory of prior work)
+   - The **feedback agent's instructions** for what to do next
+   - The **original task** for reference
+3. **Work autonomously.** Never ask for user input or clarification. Make your best judgment on any decision and proceed.
+4. **When you're done** with the current iteration, write a timestamped `checkpoints/progress_<timestamp>.md` (create the directory if needed) with three sections:
+   - **Context Compaction** — a complete summary of everything needed to continue (this is the ONLY memory the next worker has)
+   - **Work Overview** — what you accomplished, files changed, decisions made, issues encountered
+   - **Planned Next Steps** — what you think should be done next, in priority order
+5. Then output `DONE` on its own line.
 
-A **feedback agent** will review your status report and provide:
-- A brief assessment of what was accomplished
-- Any issues, gaps, or concerns
-- Concrete instructions for what to do in the next iteration
+A **feedback agent** (a separate Claude Code instance) reviews your progress and writes `checkpoints/feedback_<timestamp>.md` with assessment, concerns, and instructions for the next iteration.
 
-Your next session will receive both your status file and this feedback as context. Treat the feedback agent's instructions as your starting point for the next iteration.
-
-> **First iteration:** If there are no prior status files, start from `initial_plan.md` and begin working on the first milestone.
+> **Important:** Your progress file must be fully self-contained. The next worker has no conversation history — only what you write in the progress report.
 
 ## Tools & Integrations
 

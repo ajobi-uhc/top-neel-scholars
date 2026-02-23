@@ -1,29 +1,17 @@
 """Status tracking and feedback agent.
 
 Writes timestamped status files after each iteration and
-calls the OpenRouter API for feedback.
+spawns a Claude Code subprocess as the feedback agent.
 """
 
 import json
-import os
-import requests
+import subprocess
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
-OPENROUTER_MODEL = "anthropic/claude-sonnet-4"
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-
-
-def _load_api_key() -> str:
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if key:
-        return key
-    env_file = Path.cwd() / ".env"
-    if env_file.exists():
-        for line in env_file.read_text().splitlines():
-            if line.startswith("OPENROUTER_API_KEY="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    raise RuntimeError("OPENROUTER_API_KEY not found in env or .env file")
 
 
 def write_status(
@@ -58,53 +46,83 @@ def write_status(
     return path
 
 
-def _find_latest_status_md(workspace: str) -> Path | None:
-    """Find the most recent status_*.md file written by the worker agent."""
-    status_dir = Path(workspace) / "status"
-    if not status_dir.exists():
+def find_latest_checkpoint(workspace: str, prefix: str) -> Path | None:
+    """Find the most recent checkpoints/<prefix>_*.md file."""
+    cp_dir = Path(workspace) / "checkpoints"
+    if not cp_dir.exists():
         return None
-    md_files = sorted(status_dir.glob("status_*.md"), reverse=True)
+    md_files = sorted(cp_dir.glob(f"{prefix}_*.md"), reverse=True)
     return md_files[0] if md_files else None
 
 
-def run_feedback_agent(workspace: str, status_path: Path, timeout: int = 60) -> str | None:
-    """Call OpenRouter API to review the worker's status markdown.
+def read_all_feedback(workspace: str) -> str:
+    """Read all checkpoints/feedback_*.md files chronologically, return concatenated text."""
+    cp_dir = Path(workspace) / "checkpoints"
+    if not cp_dir.exists():
+        return ""
+    files = sorted(cp_dir.glob("feedback_*.md"))
+    if not files:
+        return ""
+    parts = []
+    for f in files:
+        parts.append(f"--- {f.name} ---\n{f.read_text().strip()}")
+    return "\n\n".join(parts)
 
-    Looks for the latest status_*.md written by the worker agent.
-    Falls back to the JSON status file if none exist.
-    Returns feedback text or None on failure.
+
+def run_feedback_agent_cc(
+    workspace: str,
+    original_task: str,
+    progress_content: str,
+    feedback_history: str,
+    timeout: int = 120,
+) -> Path | None:
+    """Spawn a Claude Code subprocess as the feedback agent.
+
+    Context is injected directly into the prompt — the agent doesn't read files.
+    Returns the path to the feedback file, or None on failure.
     """
+    template = (PROMPTS_DIR / "feedback_agent_preamble.md").read_text()
+    prompt = (template
+        .replace("{original_task}", original_task)
+        .replace("{progress_content}", progress_content)
+        .replace("{feedback_history}", feedback_history))
+
+    cmd = [
+        "claude",
+        "--dangerously-skip-permissions",
+        "-p", prompt,
+    ]
+
+    start = time.time()
     try:
-        api_key = _load_api_key()
-    except Exception:
-        return None
-
-    latest_md = _find_latest_status_md(workspace)
-    if latest_md:
-        status_content = latest_md.read_text()
-    else:
-        status_content = status_path.read_text()
-
-    prompt_template = (PROMPTS_DIR / "feedback.md").read_text()
-    prompt = prompt_template.replace("{status_content}", status_content)
-
-    try:
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": OPENROUTER_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 1024,
-            },
-            timeout=timeout,
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=workspace,
+            start_new_session=True,
         )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
-    except KeyboardInterrupt:
-        raise
-    except Exception:
+
+        # Stream output live
+        for line in proc.stdout:
+            sys.stdout.write(f"  [feedback] {line}")
+            sys.stdout.flush()
+
+        proc.wait(timeout=max(1, timeout - int(time.time() - start)))
+
+        if proc.returncode != 0:
+            print(f"  feedback agent exited with code {proc.returncode}")
+            return None
+
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        print("  feedback agent timed out")
         return None
+    except KeyboardInterrupt:
+        proc.kill()
+        proc.wait()
+        raise
+
+    return find_latest_checkpoint(workspace, "feedback")

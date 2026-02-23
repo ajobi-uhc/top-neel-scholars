@@ -38,7 +38,7 @@ class TestClaudeIntegration:
         fake_usage = {"utilization": 10.0, "resets_at": None}
 
         with patch("src.loop.run_once", side_effect=_fake_run_once(0, 2)), \
-             patch("src.loop.run_feedback_agent", return_value=None), \
+             patch("src.loop.run_feedback_agent_cc", return_value=None), \
              patch("src.rate_monitor.get_claude_token", return_value="fake-token"), \
              patch("src.rate_monitor.check_claude_usage", return_value=fake_usage):
             loop(
@@ -54,8 +54,6 @@ class TestClaudeIntegration:
         assert "[rate_monitor] started" in captured
         assert "iteration 1" in captured
         assert "iteration 2" in captured
-        # Should NOT have paused
-        assert "waiting" not in captured.split("[rate_monitor] started")[1].split("iteration 1")[0] or True
         assert "Stopped after 3 iterations" in captured
 
     def test_loop_pauses_when_usage_high(self, tmp_path, capsys):
@@ -69,7 +67,7 @@ class TestClaudeIntegration:
             return {"utilization": 10.0, "resets_at": None}
 
         with patch("src.loop.run_once", side_effect=_fake_run_once(0, 1)), \
-             patch("src.loop.run_feedback_agent", return_value=None), \
+             patch("src.loop.run_feedback_agent_cc", return_value=None), \
              patch("src.rate_monitor.get_claude_token", return_value="fake-token"), \
              patch("src.rate_monitor.check_claude_usage", side_effect=usage_fn):
             loop(
@@ -88,7 +86,7 @@ class TestClaudeIntegration:
     def test_loop_runs_without_credentials(self, tmp_path, capsys):
         """No Claude token available — monitor disabled, loop still runs."""
         with patch("src.loop.run_once", side_effect=_fake_run_once(0, 1)), \
-             patch("src.loop.run_feedback_agent", return_value=None), \
+             patch("src.loop.run_feedback_agent_cc", return_value=None), \
              patch("src.rate_monitor.get_claude_token", return_value=None):
             loop(
                 "test prompt",
@@ -137,7 +135,7 @@ class TestCodexIntegration:
         self._write_session_file(sessions_dir, 5.0)
 
         with patch("src.loop.run_once", side_effect=_fake_run_once(0, 2, output="codex\nhello\ntokens used")), \
-             patch("src.loop.run_feedback_agent", return_value=None), \
+             patch("src.loop.run_feedback_agent_cc", return_value=None), \
              patch("src.rate_monitor.check_codex_usage",
                    return_value={"utilization": 5.0, "resets_at": None}):
             loop(
@@ -166,7 +164,7 @@ class TestCodexIntegration:
             return {"utilization": 20.0, "resets_at": None}
 
         with patch("src.loop.run_once", side_effect=_fake_run_once(0, 1, output="codex\nhello\ntokens used")), \
-             patch("src.loop.run_feedback_agent", return_value=None), \
+             patch("src.loop.run_feedback_agent_cc", return_value=None), \
              patch("src.rate_monitor.check_codex_usage", side_effect=codex_usage_fn):
             loop(
                 "test prompt",
