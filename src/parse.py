@@ -1,4 +1,4 @@
-"""Detection and extraction functions for looper output parsing.
+"""Detection and extraction functions for output parsing.
 
 Pure functions, no side effects.
 """

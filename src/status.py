@@ -1,4 +1,4 @@
-"""Status tracking and feedback agent for looper.
+"""Status tracking and feedback agent.
 
 Writes timestamped status files after each iteration and
 calls the OpenRouter API for feedback.

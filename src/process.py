@@ -1,32 +1,13 @@
-"""Subprocess management for looper.
-
-Handles building commands and running them with proper ctrl+c handling.
-"""
+"""Subprocess management — run commands with live terminal output."""
 
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-
-# Tracks the currently running child so the signal handler can kill it
-_current_proc: subprocess.Popen | None = None
-
-
-def _sigint_handler(signum, frame):
-    """Kill the child process with SIGKILL and exit immediately."""
-    if _current_proc and _current_proc.poll() is None:
-        try:
-            os.kill(_current_proc.pid, signal.SIGKILL)
-        except OSError:
-            pass
-    raise KeyboardInterrupt
-
-
-# Install once on import
-signal.signal(signal.SIGINT, _sigint_handler)
 
 
 def build_cmd(provider: str, prompt: str, session_id: str | None = None) -> list[str]:
@@ -50,36 +31,45 @@ def build_cmd(provider: str, prompt: str, session_id: str | None = None) -> list
         raise ValueError(f"Unknown provider: {provider}")
 
 
-def run_once(cmd: list[str], timeout: int, cwd: str | None = None) -> tuple[str, int, float]:
-    """Run a single iteration. Returns (output, exit_code, elapsed).
+def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None) -> tuple[str, int, float]:
+    """Run a single iteration with live terminal output.
 
-    exit_code 124 = timed out.
+    Child runs in its own session so ctrl+c only hits the parent.
+    Parent catches KeyboardInterrupt and SIGKILLs the child.
+    Returns (output, exit_code, elapsed). exit_code 124 = timed out.
     """
-    global _current_proc
     start = time.time()
+    output_lines = []
+
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         cwd=cwd,
+        start_new_session=True,  # isolate child from ctrl+c
     )
-    _current_proc = proc
+
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
+        for line in proc.stdout:
+            sys.stdout.write(f"  {line}")
+            sys.stdout.flush()
+            if log_file:
+                log_file.write(line)
+                log_file.flush()
+            output_lines.append(line)
+
+        proc.wait(timeout=timeout)
         elapsed = time.time() - start
-        return stdout + stderr, proc.returncode, elapsed
+        return "".join(output_lines), proc.returncode, elapsed
+
     except subprocess.TimeoutExpired:
-        os.kill(proc.pid, signal.SIGKILL)
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         proc.wait()
         elapsed = time.time() - start
-        stdout = proc.stdout.read() if proc.stdout else ""
-        stderr = proc.stderr.read() if proc.stderr else ""
-        return stdout + stderr, 124, elapsed
+        return "".join(output_lines), 124, elapsed
+
     except KeyboardInterrupt:
-        if proc.poll() is None:
-            os.kill(proc.pid, signal.SIGKILL)
-            proc.wait()
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        proc.wait()
         raise
-    finally:
-        _current_proc = None

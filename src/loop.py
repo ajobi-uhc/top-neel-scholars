@@ -1,4 +1,4 @@
-"""Main loop orchestrator for looper."""
+"""Main loop orchestrator."""
 
 import time
 from pathlib import Path
@@ -24,15 +24,7 @@ def loop(
     limit_wait: int = 3600,
     workspace: str | None = None,
 ):
-    """Run provider in a loop until ctrl+c.
-
-    Args:
-        prompt: The task to run.
-        provider: "claude" or "codex".
-        timeout: Seconds before killing a stuck iteration.
-        limit_wait: Seconds to sleep when rate/session limited.
-        workspace: Directory to run in. Defaults to ./workspace.
-    """
+    """Run provider in a loop until ctrl+c."""
     ws = Path(workspace) if workspace else Path.cwd() / "workspace"
     ws.mkdir(parents=True, exist_ok=True)
     ws_str = str(ws.resolve())
@@ -42,7 +34,7 @@ def loop(
     iteration = 0
     current_prompt = prompt
 
-    print(f"looper | provider={provider} timeout={timeout}s limit_wait={limit_wait}s")
+    print(f"provider={provider} timeout={timeout}s limit_wait={limit_wait}s")
     print(f"workspace: {ws_str}")
     print(f"log: {logger.path}")
     print("-" * 60)
@@ -59,22 +51,14 @@ def loop(
             print(f"\n>> iteration {iteration}" + (f" (session: {session_id[:20]}...)" if session_id else ""))
             logger.iteration_start(iteration, cmd)
 
-            raw_output, exit_code, elapsed = run_once(cmd, timeout, cwd=ws_str)
-            logger.iteration_output(raw_output, exit_code, elapsed)
+            raw_output, exit_code, elapsed = run_once(cmd, timeout, cwd=ws_str, log_file=logger.file)
+            logger.iteration_output("", exit_code, elapsed)  # output already streamed to log
 
-            # Display tail of readable output
-            display_text = get_display_text(provider, raw_output)
-            lines = display_text.strip().splitlines()
-            tail = lines[-30:] if len(lines) > 30 else lines
-            for line in tail:
-                print(f"  {line}")
-
-            print(f"\n  exit={exit_code} time={elapsed:.0f}s lines={len(lines)}")
+            print(f"\n  exit={exit_code} time={elapsed:.0f}s")
 
             # --- detection (order matters) ---
             event = "ok"
 
-            # 1. Timeout
             if exit_code == 124:
                 event = "timeout"
                 print("  ** timed out -- retrying")
@@ -82,25 +66,23 @@ def loop(
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
                 continue
 
-            # 2. Rate limit
             if detect_rate_limit(raw_output):
                 event = "rate_limit"
-                print(f"  ** rate limit (rejected) -- waiting {limit_wait}s")
+                print(f"  ** rate limit -- waiting {limit_wait}s")
                 logger.event(f"rate limit -- waiting {limit_wait}s")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
                 time.sleep(limit_wait)
                 continue
 
-            # 3. Session/usage limit
             if detect_session_limit(raw_output):
                 event = "session_limit"
-                print(f"  ** session limit hit -- waiting {limit_wait}s")
+                print(f"  ** session limit -- waiting {limit_wait}s")
                 logger.event(f"session limit -- waiting {limit_wait}s")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
                 time.sleep(limit_wait)
                 continue
 
-            # 4. Model asking for input
+            display_text = get_display_text(provider, raw_output)
             if detect_asking_input(display_text):
                 event = "asked_input"
                 print("  ** model asked for input -- retrying")
@@ -108,7 +90,6 @@ def loop(
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
                 continue
 
-            # 5. Non-zero exit code (not timeout, not rate limit)
             if exit_code != 0:
                 event = "error"
                 print(f"  ** exit code {exit_code} -- retrying")
@@ -116,7 +97,7 @@ def loop(
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
                 continue
 
-            # 6. Success — extract session ID for next iteration
+            # Success
             if provider == "claude":
                 new_sid = extract_session_id(raw_output)
                 if new_sid:
@@ -125,7 +106,6 @@ def loop(
             print("  ok")
             logger.event("iteration ok")
 
-            # Write status and run feedback agent
             status_path = write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
 
             print("  running feedback agent...")
@@ -135,16 +115,15 @@ def loop(
             if feedback:
                 print(f"  feedback: {feedback[:200]}{'...' if len(feedback) > 200 else ''}")
                 logger.event(f"feedback: {feedback}")
-                # Build next prompt from template
                 template = (PROMPTS_DIR / "continue_with_feedback.md").read_text()
                 current_prompt = template.replace("{feedback}", feedback).replace("{original_task}", prompt)
             else:
-                print("  no feedback (agent failed or timed out)")
+                print("  no feedback")
                 logger.event("no feedback from agent")
                 current_prompt = "continue"
 
     except KeyboardInterrupt:
-        print(f"\n\nInterrupted after {iteration} iterations.")
-        logger.event(f"interrupted by user after {iteration} iterations")
+        print(f"\n\nStopped after {iteration} iterations.")
+        logger.event(f"stopped by user after {iteration} iterations")
     finally:
         logger.close()

@@ -1,7 +1,4 @@
-"""Always-on logging for looper sessions.
-
-Opens one log file per session with full raw output from each iteration.
-"""
+"""Session logging — one log file per run."""
 
 from datetime import datetime
 from pathlib import Path
@@ -9,10 +6,10 @@ from pathlib import Path
 
 class Logger:
     def __init__(self, workspace: str):
-        log_dir = Path(workspace) / "logs"
+        log_dir = Path(__file__).resolve().parent.parent / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.path = log_dir / f"looper_{stamp}.log"
+        self.path = log_dir / f"session_{stamp}.log"
         self._f = open(self.path, "w")
         self.event(f"session started — log: {self.path}")
 
@@ -29,6 +26,11 @@ class Logger:
 
     def event(self, msg: str):
         self._write(f"[{datetime.now().isoformat()}] {msg}")
+
+    @property
+    def file(self):
+        """Return the underlying file object for streaming writes."""
+        return self._f
 
     def _write(self, text: str):
         self._f.write(text + "\n")
