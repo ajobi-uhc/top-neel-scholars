@@ -11,7 +11,7 @@ from pathlib import Path
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
-def build_cmd(provider: str, prompt: str, session_id: str | None = None) -> list[str]:
+def build_cmd(provider: str, prompt: str, session_id: str | None = None, model: str | None = None) -> list[str]:
     preamble = (PROMPTS_DIR / "worker_preamble.md").read_text()
     full_prompt = preamble + "\n" + prompt
 
@@ -22,13 +22,15 @@ def build_cmd(provider: str, prompt: str, session_id: str | None = None) -> list
             "--output-format", "json",
             "--verbose",
         ]
+        if model:
+            cmd += ["--model", model]
         if session_id:
             cmd += ["--resume", session_id]
         cmd += ["-p", full_prompt]
         return cmd
     elif provider == "codex":
         if session_id:
-            return ["codex", "exec", "resume", session_id, "--dangerously-bypass-approvals-and-sandbox"]
+            return ["codex", "exec", "resume", session_id, full_prompt, "--dangerously-bypass-approvals-and-sandbox"]
         return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", full_prompt]
     else:
         raise ValueError(f"Unknown provider: {provider}")
@@ -68,7 +70,9 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
         watcher = threading.Thread(target=_cancel_watcher, daemon=True)
         watcher.start()
 
-    try:
+    # Read stdout in a background thread so the main thread stays
+    # interruptible by KeyboardInterrupt (Ctrl+C).
+    def _reader():
         for line in proc.stdout:
             sys.stdout.write(f"  {line}")
             sys.stdout.flush()
@@ -77,7 +81,22 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
                 log_file.flush()
             output_lines.append(line)
 
-        proc.wait(timeout=timeout)
+    reader = threading.Thread(target=_reader, daemon=True)
+    reader.start()
+
+    try:
+        deadline = start + timeout
+        while reader.is_alive():
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.wait()
+                reader.join(timeout=5)
+                elapsed = time.time() - start
+                return "".join(output_lines), 124, elapsed
+            reader.join(timeout=min(0.5, remaining))
+
+        proc.wait(timeout=10)
         elapsed = time.time() - start
 
         # Check if we were cancelled (process got SIGTERM from watcher)
@@ -85,12 +104,6 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
             return "".join(output_lines), 125, elapsed
 
         return "".join(output_lines), proc.returncode, elapsed
-
-    except subprocess.TimeoutExpired:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        proc.wait()
-        elapsed = time.time() - start
-        return "".join(output_lines), 124, elapsed
 
     except KeyboardInterrupt:
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
