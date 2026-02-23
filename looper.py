@@ -112,6 +112,27 @@ def extract_result_text(output: str) -> str:
     return output
 
 
+def extract_codex_response(output: str) -> str:
+    """Extract the model's response text from codex exec output.
+
+    Codex stderr contains session metadata. The model response appears
+    after the last line that is exactly 'codex', up to 'tokens used'.
+    """
+    lines = output.strip().splitlines()
+    codex_idx = None
+    for i, line in enumerate(lines):
+        if line.strip() == "codex":
+            codex_idx = i
+    if codex_idx is None:
+        return output
+    response = []
+    for line in lines[codex_idx + 1:]:
+        if line.strip() == "tokens used":
+            break
+        response.append(line)
+    return "\n".join(response)
+
+
 def extract_session_id(output: str) -> str | None:
     """Extract session ID from Claude CLI JSON output for --resume."""
     try:
@@ -194,7 +215,12 @@ def loop(
         elapsed = time.time() - start
 
         # For display, try to show the readable result text
-        display_text = extract_result_text(raw_output) if provider == "claude" else raw_output
+        if provider == "claude":
+            display_text = extract_result_text(raw_output)
+        elif provider == "codex":
+            display_text = extract_codex_response(raw_output)
+        else:
+            display_text = raw_output
         lines = display_text.strip().splitlines()
         tail = lines[-30:] if len(lines) > 30 else lines
         for line in tail:
