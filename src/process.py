@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -26,17 +27,21 @@ def build_cmd(provider: str, prompt: str, session_id: str | None = None) -> list
         cmd += ["-p", full_prompt]
         return cmd
     elif provider == "codex":
+        if session_id:
+            return ["codex", "exec", "resume", session_id, "--dangerously-bypass-approvals-and-sandbox"]
         return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", full_prompt]
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
 
-def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None) -> tuple[str, int, float]:
+def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None,
+             cancel_event=None) -> tuple[str, int, float]:
     """Run a single iteration with live terminal output.
 
     Child runs in its own session so ctrl+c only hits the parent.
     Parent catches KeyboardInterrupt and SIGKILLs the child.
-    Returns (output, exit_code, elapsed). exit_code 124 = timed out.
+    Returns (output, exit_code, elapsed).
+    exit_code 124 = timed out, 125 = cancelled by rate monitor.
     """
     start = time.time()
     output_lines = []
@@ -50,6 +55,19 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
         start_new_session=True,  # isolate child from ctrl+c
     )
 
+    # Watcher thread: kills the subprocess when cancel_event is set
+    def _cancel_watcher():
+        cancel_event.wait()
+        if proc.poll() is None:  # still running
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
+
+    if cancel_event:
+        watcher = threading.Thread(target=_cancel_watcher, daemon=True)
+        watcher.start()
+
     try:
         for line in proc.stdout:
             sys.stdout.write(f"  {line}")
@@ -61,6 +79,11 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
 
         proc.wait(timeout=timeout)
         elapsed = time.time() - start
+
+        # Check if we were cancelled (process got SIGTERM from watcher)
+        if cancel_event and cancel_event.is_set():
+            return "".join(output_lines), 125, elapsed
+
         return "".join(output_lines), proc.returncode, elapsed
 
     except subprocess.TimeoutExpired:
