@@ -20,6 +20,28 @@ The `context/` folder contains background materials you can consult as needed:
 - `context/mats_expectations.md` — MATS program structure, evaluation criteria, and timeline; check this for deadlines or deliverable requirements
 - `context/relevant_papers.md` — Key papers and references for the project area; consult when you need related work or baselines
 
+## Workflow — RALPH Loop
+
+You operate in an automated **RALPH loop** — a cycle of agent iterations with feedback. Here's how it works:
+
+1. **Each session**, you pick up from the status and feedback left by the previous iteration. Check `status/` for the most recent `status_<timestamp>.md` and its corresponding feedback.
+2. **Work autonomously.** Never ask for user input or clarification. Make your best judgment on any decision and proceed.
+3. **When you're done** with the current iteration, write a status file at `status/status_<timestamp>.md` summarizing:
+   - What you accomplished
+   - What files you changed
+   - Any issues encountered
+   - What you think should be done next
+4. Then output `DONE` on its own line.
+
+A **feedback agent** will review your status report and provide:
+- A brief assessment of what was accomplished
+- Any issues, gaps, or concerns
+- Concrete instructions for what to do in the next iteration
+
+Your next session will receive both your status file and this feedback as context. Treat the feedback agent's instructions as your starting point for the next iteration.
+
+> **First iteration:** If there are no prior status files, start from `initial_plan.md` and begin working on the first milestone.
+
 ## Tools & Integrations
 
 ### OpenRouter Credits
@@ -77,6 +99,7 @@ Webhook URL should be stored in `.env` as `DISCORD_UPDATES_WEBHOOK_URL`. Post up
 ├── CLAUDE.md                 # This file
 ├── initial_plan.md           # Research project description and plan
 ├── .env                      # API keys and webhook URLs (do not commit)
+├── status/                   # Iteration status files and feedback logs
 ├── context/
 │   ├── neel_research_philosophy.md
 │   ├── mech_interp_overview.md
