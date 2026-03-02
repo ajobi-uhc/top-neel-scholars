@@ -8,8 +8,6 @@ Supports both Claude Code and Codex CLI providers.
 """
 
 import argparse
-import shutil
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +22,7 @@ from src.parse import (
 )
 from src.process import run_once
 from src.rate_monitor import RateMonitor
+from src.sandbox import setup_sandbox
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -203,14 +202,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    SANDBOX_REPO = "https://github.com/divanoval/top-scholar-sandbox.git"
-    SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
-
-    print(f"Cloning {SANDBOX_REPO} ...")
-    if SANDBOX_DIR.exists():
-        shutil.rmtree(SANDBOX_DIR)
-    subprocess.run(["git", "clone", SANDBOX_REPO, str(SANDBOX_DIR)], check=True)
-    print(f"Cloned to {SANDBOX_DIR}")
+    SANDBOX_DIR = setup_sandbox()
     print("-" * 60)
 
     baseline(
