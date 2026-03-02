@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Pane: tail -f a timeline log (no refresh/flicker)
 cd "$(dirname "$0")/.."
-STATUS_DIR="./workspace/status"
+WORKSPACE="${1:-$HOME/sandbox}"
+STATUS_DIR="$WORKSPACE/status"
 LOGFILE="$STATUS_DIR/_timeline.log"
 
 mkdir -p "$STATUS_DIR"
+trap 'kill $(jobs -p) 2>/dev/null' EXIT
 
 # Reset the log and seed with all existing iterations (oldest first)
 : > "$LOGFILE"
-for f in $(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | tac); do
+for f in $(ls "$STATUS_DIR"/status_*.json 2>/dev/null | sort); do
     python3 -c "
 import json, sys
 with open(sys.argv[1]) as fh:
@@ -26,7 +28,7 @@ done
 
 # Background: watch for new status files and append to the log
 (
-    LAST_JSON=$(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | head -1)
+    LAST_JSON=$(ls "$STATUS_DIR"/status_*.json 2>/dev/null | sort | tail -1)
     while true; do
         json=$(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | head -1)
 

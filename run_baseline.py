@@ -23,6 +23,7 @@ from src.parse import (
 from src.process import run_once
 from src.rate_monitor import RateMonitor
 from src.sandbox import setup_sandbox
+from src.status import write_status
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -121,6 +122,7 @@ def baseline(
             if exit_code == 125:
                 print(f" rate-limited ({elapsed:.0f}s)")
                 logger.event("cancelled by rate monitor")
+                write_status(ws_str, turn, "rate_cancelled", exit_code, elapsed, session_id, raw_output)
                 monitor.wait_if_needed()
                 turn -= 1
                 continue
@@ -128,12 +130,14 @@ def baseline(
             if exit_code == 124:
                 print(f" timeout ({elapsed:.0f}s)")
                 logger.event("timeout -- retrying")
+                write_status(ws_str, turn, "timeout", exit_code, elapsed, session_id, raw_output)
                 turn -= 1
                 continue
 
             if exit_code != 0:
                 print(f" error exit={exit_code} ({elapsed:.0f}s)")
                 logger.event(f"exit code {exit_code} -- retrying")
+                write_status(ws_str, turn, "error", exit_code, elapsed, session_id, raw_output)
                 turn -= 1
                 continue
 
@@ -148,13 +152,16 @@ def baseline(
             display_text = get_display_text(provider, raw_output)
 
             if detect_asking_input(display_text):
+                event = "asked_input"
                 status = "asked input — auto-responding"
                 logger.event("model asked for input -- auto-responding")
             else:
+                event = "ok"
                 status = "ok"
                 logger.event("turn ok -- auto-continuing")
 
             print(f" {status} ({elapsed:.0f}s)")
+            write_status(ws_str, turn, event, exit_code, elapsed, session_id, raw_output)
 
             # Print a short preview of Claude's response
             preview = display_text.strip().replace("\n", " ")
@@ -213,4 +220,3 @@ if __name__ == "__main__":
         rate_threshold=args.rate_threshold,
         workspace=str(SANDBOX_DIR),
     )
-

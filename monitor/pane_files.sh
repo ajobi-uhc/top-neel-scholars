@@ -1,29 +1,44 @@
 #!/usr/bin/env bash
-# Pane: tail -f a workspace files log (no refresh/flicker, macOS compatible)
+# Pane: tail -f a workspace files log (no refresh/flicker)
 cd "$(dirname "$0")/.."
-WS="./workspace"
-LOGFILE="./workspace/status/_files.log"
+WS="${1:-$HOME/sandbox}"
+LOGFILE="$WS/status/_files.log"
 
-mkdir -p "./workspace/status"
+mkdir -p "$WS/status"
+trap 'kill $(jobs -p) 2>/dev/null' EXIT
+
+# Helper: list workspace files sorted by mtime (newest first)
+# Uses find -printf (Linux) for speed — no per-file subprocess.
+list_files() {
+    find "$WS" -type f \
+        -not -path "*/.git/*" \
+        -not -path "*/status/*" \
+        -not -path "*/__pycache__/*" \
+        -not -name "*.pyc" \
+        -printf "%T@ %TY-%Tm-%Td %TH:%TM  %p\n" 2>/dev/null \
+        | sort -rn | head -25 | cut -d' ' -f2- \
+        | while read -r line; do
+            echo "  $line"
+        done
+}
+
+file_count() {
+    find "$WS" -type f \
+        -not -path "*/.git/*" \
+        -not -path "*/status/*" \
+        -not -path "*/__pycache__/*" \
+        -not -name "*.pyc" 2>/dev/null | wc -l
+}
 
 # Seed the log with current file listing
 : > "$LOGFILE"
 {
     printf '=== WORKSPACE FILES ===\n\n'
     if [ -d "$WS" ]; then
-        find "$WS" -type f \
-            -not -path "*/status/*" \
-            -not -path "*/__pycache__/*" \
-            -not -name "*.pyc" \
-            -exec stat -f "%m %Sm  %N" -t "%Y-%m-%d %H:%M" {} \; 2>/dev/null \
-            | sort -rn | head -25 | cut -d' ' -f2- \
-            | while read -r line; do
-                echo "  $line"
-            done
+        list_files
 
         echo ""
-        total=$(find "$WS" -type f -not -path "*/status/*" -not -name "*.pyc" 2>/dev/null | wc -l)
-        printf '  %s files in workspace (excl. status/)\n' "$total"
+        printf '  %s files in workspace (excl. .git/, status/)\n' "$(file_count)"
     else
         echo "  Workspace not yet created."
     fi
@@ -36,19 +51,10 @@ mkdir -p "./workspace/status"
         {
             printf '\n--- Updated: %s ---\n\n' "$(date +%H:%M:%S)"
             if [ -d "$WS" ]; then
-                find "$WS" -type f \
-                    -not -path "*/status/*" \
-                    -not -path "*/__pycache__/*" \
-                    -not -name "*.pyc" \
-                    -exec stat -f "%m %Sm  %N" -t "%Y-%m-%d %H:%M" {} \; 2>/dev/null \
-                    | sort -rn | head -25 | cut -d' ' -f2- \
-                    | while read -r line; do
-                        echo "  $line"
-                    done
+                list_files
 
                 echo ""
-                total=$(find "$WS" -type f -not -path "*/status/*" -not -name "*.pyc" 2>/dev/null | wc -l)
-                printf '  %s files in workspace (excl. status/)\n' "$total"
+                printf '  %s files in workspace (excl. .git/, status/)\n' "$(file_count)"
             fi
         } >> "$LOGFILE"
     done
