@@ -8,7 +8,7 @@ YOU ARE RUNNING AUTONOMOUSLY AND SHOULD EXECUTE THIS PROJECT WITHOUT ANY USER IN
 
 ## Github
 
-All code should be pushed to Github. The token is already embedded in the remote URL, so you can directly use `git push` without any additional authentication setup.
+All code should be pushed to Github. A fine-grained token is already embedded in the git remote URL (in the format `https://<user>:<token>@github.com/...`), so you can directly use `git push` without any additional authentication setup.
 
 ## OpenRouter
 
