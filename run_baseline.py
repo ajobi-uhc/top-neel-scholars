@@ -55,18 +55,10 @@ def baseline(
     session_id = None
     turn = 0
 
-    # Pretty output file for human reading
+    # Per-run directory for human-readable markdown logs
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_dir = Path(__file__).resolve().parent / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    output_path = log_dir / f"baseline_{stamp}.md"
-    output_file = open(output_path, "w")
-    output_file.write(f"# Baseline Run — {stamp}\n\n")
-    output_file.write(f"**Task:** {prompt.strip()}\n\n")
-    output_file.write(f"**Model:** {model or 'default'}\n\n")
-    output_file.write(f"**Auto-continue prompt:** \"{AUTO_RESPONSE}\"\n\n")
-    output_file.write(f"---\n\n")
-    output_file.flush()
+    run_dir = Path(__file__).resolve().parent / "logs" / f"baseline_{stamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     monitor = RateMonitor(
         provider="claude",
@@ -76,7 +68,7 @@ def baseline(
     )
     monitor.start()
 
-    print(f"output: {output_path}")
+    print(f"output: {run_dir}")
     print(f"log:    {logger.path}")
 
     try:
@@ -146,12 +138,13 @@ def baseline(
                 preview = preview[:120] + "..."
             print(f"  >> {preview}")
 
-            # Write pretty output to file
+            # Write per-turn markdown file
             detailed_md = raw_output_to_markdown(raw_output)
-            output_file.write(f"## Turn {turn} — {turn_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [{status}]\n\n")
-            output_file.write(detailed_md.strip() + "\n\n")
-            output_file.write("---\n\n")
-            output_file.flush()
+            turn_path = run_dir / f"turn_{turn:02d}.md"
+            turn_path.write_text(
+                f"# Turn {turn} — {turn_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [{status}]\n\n"
+                + detailed_md.strip() + "\n"
+            )
 
         print(f"[{datetime.now().strftime('%H:%M:%S')}] done — reached max turns ({max_turns})")
         logger.event(f"reached max turns ({max_turns})")
@@ -160,10 +153,9 @@ def baseline(
         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] stopped after {turn} turns")
         logger.event(f"stopped by user after {turn} turns")
     finally:
-        output_file.close()
         monitor.stop()
         logger.close()
-        print(f"output: {output_path}")
+        print(f"output: {run_dir}")
 
 
 if __name__ == "__main__":
