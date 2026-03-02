@@ -33,13 +33,14 @@ def build_cmd(provider: str, prompt: str, model: str | None = None) -> list[str]
 
 
 def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None,
-             cancel_event=None) -> tuple[str, int, float]:
+             cancel_event=None, quiet: bool = False) -> tuple[str, int, float]:
     """Run a single iteration with live terminal output.
 
     Child runs in its own session so ctrl+c only hits the parent.
     Parent catches KeyboardInterrupt and SIGKILLs the child.
     Returns (output, exit_code, elapsed).
     exit_code 124 = timed out, 125 = cancelled by rate monitor.
+    If quiet=True, suppress terminal output (still captures and logs).
     """
     start = time.time()
     output_lines = []
@@ -71,8 +72,9 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
     # interruptible by KeyboardInterrupt (Ctrl+C).
     def _reader():
         for line in proc.stdout:
-            sys.stdout.write(f"  {line}")
-            sys.stdout.flush()
+            if not quiet:
+                sys.stdout.write(f"  {line}")
+                sys.stdout.flush()
             if log_file:
                 log_file.write(line)
                 log_file.flush()
