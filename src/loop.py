@@ -9,6 +9,7 @@ from src.parse import (
     extract_codex_session_id,
     extract_session_id,
     get_display_text,
+    raw_output_to_markdown,
 )
 from src.process import build_cmd, run_once
 from src.rate_monitor import RateMonitor
@@ -35,17 +36,10 @@ def loop(
     session_id = None
     iteration = 0
 
-    # Pretty markdown output file for human reading
+    # Per-run directory for human-readable markdown logs
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_dir = Path(__file__).resolve().parent.parent / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    output_path = log_dir / f"ralph_{stamp}.md"
-    output_file = open(output_path, "w")
-    output_file.write(f"# RALPH Run — {stamp}\n\n")
-    output_file.write(f"**Task:** {prompt.strip()}\n\n")
-    output_file.write(f"**Provider:** {provider} | **Model:** {model or 'default'}\n\n")
-    output_file.write(f"---\n\n")
-    output_file.flush()
+    run_dir = Path(__file__).resolve().parent.parent / "logs" / f"ralph_{stamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     monitor = RateMonitor(
         provider=provider,
@@ -57,7 +51,7 @@ def loop(
 
     print(f"provider={provider} max_wait={max_wait}s")
     print(f"workspace: {ws_str}")
-    print(f"output: {output_path}")
+    print(f"output: {run_dir}")
     print(f"log:    {logger.path}")
     print("-" * 60)
 
@@ -109,8 +103,8 @@ def loop(
                 print(f" rate-limited ({elapsed:.0f}s)")
                 logger.event("cancelled by rate monitor")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
-                output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [rate-limited]\n\n---\n\n")
-                output_file.flush()
+                iter_path = run_dir / f"iteration_{iteration:02d}.md"
+                iter_path.write_text(f"# Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [rate-limited]\n")
                 monitor.wait_if_needed()
                 continue
 
@@ -119,8 +113,8 @@ def loop(
                 print(f" timeout ({elapsed:.0f}s)")
                 logger.event("timeout -- retrying")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
-                output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [timeout]\n\n---\n\n")
-                output_file.flush()
+                iter_path = run_dir / f"iteration_{iteration:02d}.md"
+                iter_path.write_text(f"# Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [timeout]\n")
                 continue
 
             display_text = get_display_text(provider, raw_output)
@@ -129,8 +123,8 @@ def loop(
                 print(f" asked input ({elapsed:.0f}s)")
                 logger.event("model asked for input -- retrying")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
-                output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [asked input]\n\n---\n\n")
-                output_file.flush()
+                iter_path = run_dir / f"iteration_{iteration:02d}.md"
+                iter_path.write_text(f"# Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [asked input]\n")
                 continue
 
             if exit_code != 0:
@@ -138,8 +132,8 @@ def loop(
                 print(f" error exit={exit_code} ({elapsed:.0f}s)")
                 logger.event(f"exit code {exit_code} -- retrying")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
-                output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [error exit={exit_code}]\n\n---\n\n")
-                output_file.flush()
+                iter_path = run_dir / f"iteration_{iteration:02d}.md"
+                iter_path.write_text(f"# Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [error exit={exit_code}]\n")
                 continue
 
             # Success — extract session ID for logging
@@ -163,10 +157,11 @@ def loop(
 
             write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
 
-            # Write worker output to markdown
-            output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [ok]\n\n")
-            output_file.write("### Worker Output\n\n")
-            output_file.write(display_text.strip() + "\n\n")
+            # Build per-iteration markdown
+            md_parts = []
+            md_parts.append(f"# Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [ok]\n")
+            detailed_md = raw_output_to_markdown(raw_output)
+            md_parts.append(detailed_md.strip() + "\n")
 
             # Find the finished file the worker just wrote
             finished_path = find_latest_checkpoint(ws_str, "finished")
@@ -188,20 +183,19 @@ def loop(
                 feedback_text = feedback_path.read_text()
                 print(f" done ({feedback_path.name})")
                 logger.event(f"feedback written to: {feedback_path}")
-                output_file.write("### Feedback\n\n")
-                output_file.write(feedback_text.strip() + "\n\n")
+                md_parts.append("\n## Feedback\n")
+                md_parts.append(feedback_text.strip() + "\n")
             else:
                 print(" no feedback produced")
                 logger.event("no feedback file from agent")
 
-            output_file.write("---\n\n")
-            output_file.flush()
+            iter_path = run_dir / f"iteration_{iteration:02d}.md"
+            iter_path.write_text("\n".join(md_parts))
 
     except KeyboardInterrupt:
         print(f"\n\nStopped after {iteration} iterations.")
         logger.event(f"stopped by user after {iteration} iterations")
     finally:
-        output_file.close()
         monitor.stop()
         logger.close()
-        print(f"output: {output_path}")
+        print(f"output: {run_dir}")

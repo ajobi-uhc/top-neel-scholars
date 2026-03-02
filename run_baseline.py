@@ -1,8 +1,10 @@
-"""Baseline: single Claude CLI session with auto-continue responses.
+"""Baseline: single CLI session with auto-continue responses.
 
 No RALPH loop, no feedback agent, no progress checkpointing.
 Just a single continuous session that auto-responds with
 "please continue based on your best judgement" after each turn.
+
+Supports both Claude Code and Codex CLI providers.
 """
 
 import argparse
@@ -12,16 +14,34 @@ from datetime import datetime
 from pathlib import Path
 
 from src.log import Logger
-from src.parse import detect_asking_input, extract_session_id, get_display_text
+from src.parse import (
+    codex_output_to_markdown,
+    detect_asking_input,
+    extract_codex_session_id,
+    extract_session_id,
+    get_display_text,
+    raw_output_to_markdown,
+)
 from src.process import run_once
 from src.rate_monitor import RateMonitor
 
 AUTO_RESPONSE = "please continue based on your best judgement"
 
 
-def build_cmd(prompt: str, model: str | None = None,
+def build_cmd(provider: str, prompt: str, model: str | None = None,
               resume_session: str | None = None) -> list[str]:
-    """Build Claude CLI command — no worker preamble, just the raw prompt."""
+    """Build CLI command — no worker preamble, just the raw prompt."""
+    if provider == "codex":
+        cmd = ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--json"]
+        if model:
+            cmd += ["-m", model]
+        if resume_session:
+            cmd += ["resume", resume_session, prompt]
+        else:
+            cmd += [prompt]
+        return cmd
+
+    # claude (default)
     cmd = [
         "claude",
         "--dangerously-skip-permissions",
@@ -38,15 +58,16 @@ def build_cmd(prompt: str, model: str | None = None,
 
 def baseline(
     prompt: str,
+    provider: str = "claude",
     model: str | None = None,
     timeout: int = 900,
-    max_turns: int = 50,
+    max_turns: int | None = None,
     max_wait: int = 3600,
     workspace: str | None = None,
     rate_check_interval: float = 60.0,
     rate_threshold: float = 95.0,
 ):
-    """Run a single Claude session, auto-continuing until done or max_turns."""
+    """Run a single CLI session, auto-continuing until done or max_turns (if set)."""
     ws = Path(workspace) if workspace else Path.cwd() / "workspace"
     ws.mkdir(parents=True, exist_ok=True)
     ws_str = str(ws.resolve())
@@ -55,32 +76,26 @@ def baseline(
     session_id = None
     turn = 0
 
-    # Pretty output file for human reading
+    # Per-run directory for human-readable markdown logs
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_dir = Path(__file__).resolve().parent / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    output_path = log_dir / f"baseline_{stamp}.md"
-    output_file = open(output_path, "w")
-    output_file.write(f"# Baseline Run — {stamp}\n\n")
-    output_file.write(f"**Task:** {prompt.strip()}\n\n")
-    output_file.write(f"**Model:** {model or 'default'}\n\n")
-    output_file.write(f"**Auto-continue prompt:** \"{AUTO_RESPONSE}\"\n\n")
-    output_file.write(f"---\n\n")
-    output_file.flush()
+    run_dir = Path(__file__).resolve().parent / "logs" / f"baseline_{stamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     monitor = RateMonitor(
-        provider="claude",
+        provider=provider,
         check_interval=rate_check_interval,
         threshold=rate_threshold,
         max_wait=max_wait,
     )
     monitor.start()
 
-    print(f"output: {output_path}")
+    print(f"output: {run_dir}")
     print(f"log:    {logger.path}")
 
+    turns_label = str(max_turns) if max_turns else "∞"
+
     try:
-        while turn < max_turns:
+        while max_turns is None or turn < max_turns:
             turn += 1
             turn_start = datetime.now()
 
@@ -91,10 +106,10 @@ def baseline(
             else:
                 current_prompt = AUTO_RESPONSE
 
-            cmd = build_cmd(current_prompt, model=model,
+            cmd = build_cmd(provider, current_prompt, model=model,
                             resume_session=session_id)
 
-            print(f"[{turn_start.strftime('%H:%M:%S')}] turn {turn}/{max_turns} ...", end="", flush=True)
+            print(f"[{turn_start.strftime('%H:%M:%S')}] turn {turn}/{turns_label} ...", end="", flush=True)
             logger.iteration_start(turn, cmd)
 
             raw_output, exit_code, elapsed = run_once(
@@ -125,11 +140,14 @@ def baseline(
                 continue
 
             # Success — extract session ID for resume
-            new_sid = extract_session_id(raw_output)
+            if provider == "codex":
+                new_sid = extract_codex_session_id()
+            else:
+                new_sid = extract_session_id(raw_output)
             if new_sid:
                 session_id = new_sid
 
-            display_text = get_display_text("claude", raw_output)
+            display_text = get_display_text(provider, raw_output)
 
             if detect_asking_input(display_text):
                 status = "asked input — auto-responding"
@@ -146,11 +164,16 @@ def baseline(
                 preview = preview[:120] + "..."
             print(f"  >> {preview}")
 
-            # Write pretty output to file
-            output_file.write(f"## Turn {turn} — {turn_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [{status}]\n\n")
-            output_file.write(display_text.strip() + "\n\n")
-            output_file.write("---\n\n")
-            output_file.flush()
+            # Write per-turn markdown file
+            if provider == "codex":
+                detailed_md = codex_output_to_markdown(raw_output)
+            else:
+                detailed_md = raw_output_to_markdown(raw_output)
+            turn_path = run_dir / f"turn_{turn:02d}.md"
+            turn_path.write_text(
+                f"# Turn {turn} — {turn_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [{status}]\n\n"
+                + detailed_md.strip() + "\n"
+            )
 
         print(f"[{datetime.now().strftime('%H:%M:%S')}] done — reached max turns ({max_turns})")
         logger.event(f"reached max turns ({max_turns})")
@@ -159,22 +182,23 @@ def baseline(
         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] stopped after {turn} turns")
         logger.event(f"stopped by user after {turn} turns")
     finally:
-        output_file.close()
         monitor.stop()
         logger.close()
-        print(f"output: {output_path}")
+        print(f"output: {run_dir}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Baseline: single Claude session with auto-continue"
+        description="Baseline: single CLI session with auto-continue"
     )
+    parser.add_argument("--provider", choices=["claude", "codex"], default="claude",
+                        help="Which CLI to use (default: claude)")
     parser.add_argument("--model", type=str, default=None,
                         help="Model to use (e.g. claude-haiku-4-5-20251001)")
     parser.add_argument("--timeout", type=int, default=900,
                         help="Timeout per turn in seconds (default: 900)")
-    parser.add_argument("--max-turns", type=int, default=50,
-                        help="Max auto-continue turns (default: 50)")
+    parser.add_argument("--max-turns", type=int, default=None,
+                        help="Max auto-continue turns (default: unlimited)")
     parser.add_argument("--rate-threshold", type=float, default=95.0,
                         help="Pause when usage %% exceeds this (0-100)")
     parser.add_argument("--task", type=str, default=None,
@@ -206,6 +230,7 @@ This should take multiple iterations — get the core logic working first, then 
 
     baseline(
         TASK,
+        provider=args.provider,
         model=args.model,
         timeout=args.timeout,
         max_turns=args.max_turns,
