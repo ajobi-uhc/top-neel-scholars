@@ -8,6 +8,11 @@ dependencies = []
 [tool.setuptools]
 packages = ["src"]
 
+[tool.uv.workspace]
+members = [
+    "sandbox",
+]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

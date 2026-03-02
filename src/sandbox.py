@@ -18,7 +18,7 @@ from pathlib import Path
 _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 DEFAULT_UPSTREAM = "divanoval/top-scholar-sandbox"
-DEFAULT_SANDBOX_DIR = Path(__file__).resolve().parent.parent / "sandbox"
+DEFAULT_SANDBOX_DIR = Path.home() / "sandbox"
 
 
 def _load_github_creds() -> tuple[str, str]:
