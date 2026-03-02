@@ -44,9 +44,31 @@ def extract_result_text(output: str) -> str:
 def extract_codex_response(output: str) -> str:
     """Extract the model's response text from codex exec output.
 
-    Codex stderr contains session metadata. The model response appears
-    after the last line that is exactly 'codex', up to 'tokens used'.
+    Handles two formats:
+    - JSONL (from --json flag): extracts agent_message text from events
+    - Plain text: parses between 'codex' marker and 'tokens used'
     """
+    # Try JSONL first
+    messages = []
+    is_jsonl = False
+    for line in output.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+            is_jsonl = True
+            if (event.get("type") == "item.completed"
+                    and event.get("item", {}).get("type") == "agent_message"):
+                text = event["item"].get("text", "")
+                if text:
+                    messages.append(text)
+        except json.JSONDecodeError:
+            continue
+    if is_jsonl:
+        return "\n".join(messages) if messages else output
+
+    # Fall back to plain text parsing
     lines = output.strip().splitlines()
     codex_idx = None
     for i, line in enumerate(lines):
@@ -226,5 +248,112 @@ def raw_output_to_markdown(raw_output: str) -> str:
                 if cost:
                     summary.append(f"${cost:.4f}")
                 parts.append(f"*Session: {' | '.join(summary)}*\n")
+
+    return "\n".join(parts) if parts else raw_output
+
+
+def codex_output_to_markdown(raw_output: str) -> str:
+    """Convert Codex exec --json JSONL output to human-readable markdown.
+
+    Parses the JSONL event stream and formats reasoning, commands,
+    file changes, and agent messages into readable markdown.
+    """
+    events = []
+    for line in raw_output.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if not events:
+        return raw_output
+
+    parts = []
+    step = 0
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        etype = event.get("type")
+        item = event.get("item", {})
+        itype = item.get("type")
+
+        if etype == "item.completed" and itype == "reasoning":
+            text = item.get("text", "").strip()
+            if text:
+                step += 1
+                parts.append(f"**Step {step} — Thinking**\n")
+                parts.append(f"> {text}\n")
+
+        elif etype == "item.completed" and itype == "command_execution":
+            step += 1
+            command = item.get("command", "")
+            # Strip "bash -lc " prefix if present
+            display_cmd = command
+            if display_cmd.startswith("bash -lc "):
+                display_cmd = display_cmd[len("bash -lc "):]
+            parts.append(f"**Step {step} — Command**\n")
+            parts.append(f"```bash\n{display_cmd}\n```\n")
+            output = item.get("aggregated_output", "").strip()
+            exit_code = item.get("exit_code")
+            if output:
+                label = "Error" if exit_code and exit_code != 0 else "Result"
+                parts.append(f"*{label} (exit {exit_code}):*\n```\n{_truncate(output)}\n```\n")
+            elif exit_code and exit_code != 0:
+                parts.append(f"*Error (exit {exit_code})*\n")
+
+        elif etype == "item.completed" and itype == "file_change":
+            step += 1
+            changes = item.get("changes", [])
+            parts.append(f"**Step {step} — File Changes**\n")
+            for change in changes:
+                kind = change.get("kind", "update")
+                path = change.get("path", "?")
+                parts.append(f"- `{kind}` `{path}`\n")
+
+        elif etype == "item.completed" and itype == "agent_message":
+            text = item.get("text", "").strip()
+            if text:
+                step += 1
+                parts.append(f"**Step {step} — Response**\n")
+                parts.append(f"{text}\n")
+
+        elif etype == "item.completed" and itype == "mcp_tool_call":
+            step += 1
+            server = item.get("server", "")
+            tool = item.get("tool", "")
+            parts.append(f"**Step {step} — MCP Tool: `{server}.{tool}`**\n")
+            args = item.get("arguments", {})
+            if args:
+                compact = json.dumps(args, indent=2)
+                if len(compact) > 500:
+                    compact = compact[:500] + "\n..."
+                parts.append(f"```json\n{compact}\n```\n")
+            result = item.get("result", {})
+            content_blocks = result.get("content", [])
+            for block in content_blocks:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(f"*Result:*\n```\n{_truncate(block.get('text', ''))}\n```\n")
+
+        elif etype == "item.completed" and itype == "web_search":
+            step += 1
+            query = item.get("query", "")
+            parts.append(f"**Step {step} — Web Search:** `{query}`\n")
+
+        elif etype == "item.completed" and itype == "error":
+            step += 1
+            msg = item.get("message", "")
+            parts.append(f"**Step {step} — Error:** {msg}\n")
+
+        elif etype == "turn.completed":
+            usage = event.get("usage", {})
+            if usage:
+                inp = usage.get("input_tokens", 0)
+                out = usage.get("output_tokens", 0)
+                cached = usage.get("cached_input_tokens", 0)
+                parts.append(f"*Tokens: {inp} in ({cached} cached) / {out} out*\n")
 
     return "\n".join(parts) if parts else raw_output
