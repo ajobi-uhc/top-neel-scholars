@@ -1,29 +1,57 @@
 #!/usr/bin/env bash
-# Pane: recently modified workspace files
+# Pane: tail -f a workspace files log (no refresh/flicker, macOS compatible)
 cd "$(dirname "$0")/.."
 WS="./workspace"
+LOGFILE="./workspace/status/_files.log"
 
-while true; do
-    clear
-    printf '\033[1;33m=== WORKSPACE FILES ===\033[0m\n\n'
+mkdir -p "./workspace/status"
 
+# Seed the log with current file listing
+: > "$LOGFILE"
+{
+    printf '=== WORKSPACE FILES ===\n\n'
     if [ -d "$WS" ]; then
         find "$WS" -type f \
             -not -path "*/status/*" \
             -not -path "*/__pycache__/*" \
             -not -name "*.pyc" \
-            -printf "%T@ %Tc  %P\n" 2>/dev/null \
-            | sort -rn | head -25 | cut -d" " -f2- \
+            -exec stat -f "%m %Sm  %N" -t "%Y-%m-%d %H:%M" {} \; 2>/dev/null \
+            | sort -rn | head -25 | cut -d' ' -f2- \
             | while read -r line; do
                 echo "  $line"
             done
 
         echo ""
         total=$(find "$WS" -type f -not -path "*/status/*" -not -name "*.pyc" 2>/dev/null | wc -l)
-        printf '\033[0;37m  %s files in workspace (excl. status/)\033[0m\n' "$total"
+        printf '  %s files in workspace (excl. status/)\n' "$total"
     else
         echo "  Workspace not yet created."
     fi
+} > "$LOGFILE"
 
-    sleep 10
-done
+# Background: periodically refresh the listing
+(
+    while true; do
+        sleep 10
+        {
+            printf '\n--- Updated: %s ---\n\n' "$(date +%H:%M:%S)"
+            if [ -d "$WS" ]; then
+                find "$WS" -type f \
+                    -not -path "*/status/*" \
+                    -not -path "*/__pycache__/*" \
+                    -not -name "*.pyc" \
+                    -exec stat -f "%m %Sm  %N" -t "%Y-%m-%d %H:%M" {} \; 2>/dev/null \
+                    | sort -rn | head -25 | cut -d' ' -f2- \
+                    | while read -r line; do
+                        echo "  $line"
+                    done
+
+                echo ""
+                total=$(find "$WS" -type f -not -path "*/status/*" -not -name "*.pyc" 2>/dev/null | wc -l)
+                printf '  %s files in workspace (excl. status/)\n' "$total"
+            fi
+        } >> "$LOGFILE"
+    done
+) &
+
+exec tail -n +1 -f "$LOGFILE"

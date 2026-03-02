@@ -1,23 +1,14 @@
 #!/usr/bin/env bash
-# Pane: show latest status JSON + worker markdown
+# Pane: tail -f a status log (no refresh/flicker)
 cd "$(dirname "$0")/.."
 STATUS_DIR="./workspace/status"
+LOGFILE="$STATUS_DIR/_status.log"
 
-while true; do
-    clear
-    printf '\033[1;33m=== LATEST STATUS ===\033[0m\n\n'
+mkdir -p "$STATUS_DIR"
 
-    md=$(ls -t "$STATUS_DIR"/status_*.md 2>/dev/null | head -1)
-    if [ -n "$md" ]; then
-        printf '\033[1;36m--- Worker Status (%s) ---\033[0m\n' "$(basename "$md")"
-        cat "$md" 2>/dev/null
-        echo ""
-    fi
-
-    json=$(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | head -1)
-    if [ -n "$json" ]; then
-        printf '\033[1;32m--- Looper Status (%s) ---\033[0m\n' "$(basename "$json")"
-        python3 -c "
+# Helper to format a status JSON file
+format_json() {
+    python3 -c "
 import json, sys
 with open(sys.argv[1]) as fh:
     d = json.load(fh)
@@ -34,18 +25,55 @@ if tail:
     print(f'  Output tail ({len(lines)} lines):')
     for l in lines[-10:]:
         print(f'    {l[:120]}')
-" "$json" 2>/dev/null
+" "$1" 2>/dev/null
+}
+
+# Reset and seed with all existing status files (oldest first)
+: > "$LOGFILE"
+for f in $(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | tac); do
+    {
+        # Find matching .md (same timestamp suffix)
+        base=$(basename "$f" .json)
+        md_file="$STATUS_DIR/${base}.md"
+        if [ -f "$md_file" ]; then
+            echo "--- Worker Status (${base}.md) ---"
+            cat "$md_file" 2>/dev/null
+            echo ""
+        fi
+        echo "--- Looper Status ($(basename "$f")) ---"
+        format_json "$f"
         echo ""
-    fi
-
-    if [ -z "$md" ] && [ -z "$json" ]; then
-        echo "  No status files yet in $STATUS_DIR"
-        echo "  (start the agent with: python run.py)"
-    fi
-
-    n_json=$(ls "$STATUS_DIR"/status_*.json 2>/dev/null | wc -l)
-    n_md=$(ls "$STATUS_DIR"/status_*.md 2>/dev/null | wc -l)
-    printf '\033[0;37m  Total: %s iterations, %s worker status reports\033[0m\n' "$n_json" "$n_md"
-
-    sleep 5
+    } >> "$LOGFILE"
 done
+
+# Background: watch for new status files and append to the log
+(
+    LAST_JSON=$(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | head -1)
+    LAST_MD=$(ls -t "$STATUS_DIR"/status_*.md 2>/dev/null | head -1)
+    while true; do
+        md=$(ls -t "$STATUS_DIR"/status_*.md 2>/dev/null | head -1)
+        json=$(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | head -1)
+
+        if [ -n "$md" ] && [ "$md" != "$LAST_MD" ]; then
+            {
+                echo "--- Worker Status ($(basename "$md")) ---"
+                cat "$md" 2>/dev/null
+                echo ""
+            } >> "$LOGFILE"
+            LAST_MD="$md"
+        fi
+
+        if [ -n "$json" ] && [ "$json" != "$LAST_JSON" ]; then
+            {
+                echo "--- Looper Status ($(basename "$json")) ---"
+                format_json "$json"
+                echo ""
+            } >> "$LOGFILE"
+            LAST_JSON="$json"
+        fi
+
+        sleep 5
+    done
+) &
+
+exec tail -n +1 -f "$LOGFILE"
