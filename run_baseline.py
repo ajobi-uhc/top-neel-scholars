@@ -8,6 +8,8 @@ Supports both Claude Code and Codex CLI providers.
 """
 
 import argparse
+import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -22,9 +24,8 @@ from src.parse import (
 )
 from src.process import run_once
 from src.rate_monitor import RateMonitor
-from src.sandbox import setup_sandbox
 
-AUTO_RESPONSE = "please continue based on your best judgement"
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 
 def build_cmd(provider: str, prompt: str, model: str | None = None,
@@ -56,7 +57,6 @@ def build_cmd(provider: str, prompt: str, model: str | None = None,
 
 
 def baseline(
-    prompt: str,
     provider: str = "claude",
     model: str | None = None,
     timeout: int = 900,
@@ -101,9 +101,9 @@ def baseline(
             monitor.wait_if_needed()
 
             if turn == 1:
-                current_prompt = prompt
+                current_prompt = (PROMPTS_DIR / "baseline" / "start.md").read_text()
             else:
-                current_prompt = AUTO_RESPONSE
+                current_prompt = (PROMPTS_DIR / "baseline" / "continuation.md").read_text()
 
             cmd = build_cmd(provider, current_prompt, model=model,
                             resume_session=session_id)
@@ -200,29 +200,20 @@ if __name__ == "__main__":
                         help="Max auto-continue turns (default: unlimited)")
     parser.add_argument("--rate-threshold", type=float, default=95.0,
                         help="Pause when usage %% exceeds this (0-100)")
-    parser.add_argument("--task", type=str, default=None,
-                        help="Override the default task prompt")
 
     args = parser.parse_args()
 
-    TASK = args.task or """\
-Build a small Python CLI tool in src/wordfreq.py that:
-1. Reads a text file passed as a CLI argument
-2. Counts word frequencies (case-insensitive, strip punctuation)
-3. Prints the top 10 most common words with their counts
-4. Write tests in tests/test_wordfreq.py and make sure they pass
-5. Create a sample input file at data/sample.txt with a few paragraphs of text
-6. Run the tool on the sample file and verify it works
+    SANDBOX_REPO = "https://github.com/divanoval/top-scholar-sandbox.git"
+    SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
 
-This should take multiple iterations — get the core logic working first, then tests, then polish.
-"""
-
-    # Fork upstream and clone with push access
-    SANDBOX_DIR = setup_sandbox()
+    print(f"Cloning {SANDBOX_REPO} ...")
+    if SANDBOX_DIR.exists():
+        shutil.rmtree(SANDBOX_DIR)
+    subprocess.run(["git", "clone", SANDBOX_REPO, str(SANDBOX_DIR)], check=True)
+    print(f"Cloned to {SANDBOX_DIR}")
     print("-" * 60)
 
     baseline(
-        TASK,
         provider=args.provider,
         model=args.model,
         timeout=args.timeout,
