@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.log import Logger
-from src.parse import detect_asking_input, extract_session_id, get_display_text
+from src.parse import detect_asking_input, extract_session_id, get_display_text, raw_output_to_markdown
 from src.process import run_once
 from src.rate_monitor import RateMonitor
 
@@ -147,8 +147,9 @@ def baseline(
             print(f"  >> {preview}")
 
             # Write pretty output to file
+            detailed_md = raw_output_to_markdown(raw_output)
             output_file.write(f"## Turn {turn} — {turn_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [{status}]\n\n")
-            output_file.write(display_text.strip() + "\n\n")
+            output_file.write(detailed_md.strip() + "\n\n")
             output_file.write("---\n\n")
             output_file.flush()
 

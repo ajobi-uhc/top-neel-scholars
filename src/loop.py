@@ -9,6 +9,7 @@ from src.parse import (
     extract_codex_session_id,
     extract_session_id,
     get_display_text,
+    raw_output_to_markdown,
 )
 from src.process import build_cmd, run_once
 from src.rate_monitor import RateMonitor
@@ -164,9 +165,9 @@ def loop(
             write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
 
             # Write worker output to markdown
+            detailed_md = raw_output_to_markdown(raw_output)
             output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [ok]\n\n")
-            output_file.write("### Worker Output\n\n")
-            output_file.write(display_text.strip() + "\n\n")
+            output_file.write(detailed_md.strip() + "\n\n")
 
             # Find the finished file the worker just wrote
             finished_path = find_latest_checkpoint(ws_str, "finished")
