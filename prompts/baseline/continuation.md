@@ -1,5 +1,3 @@
 # Baseline Continuation Prompt
 
-Please take a look at `START.md` in this codebase for instructions. You are being run autonomously and should execute this project without input from the user. Ask no questions, make decisions on your own, and do not enter plan mode.
-
-Before you finish your session, recall that you must write up your work in a file `memories/finished_{timestamp}.md` where the timestamp is the current time, in ISO 8601 format. Your `finished.md` file should include your experimental setup, methodology, implementation details, results, interpretation of results, and next steps. Be sure to include all relevant filepaths.
+Please continue working on the research project based on your best judgement. Take a look at the README, project description, and your own past work to understand the best next steps to take. Continue refining the work and add additional depth to your experiments and conclusions.
