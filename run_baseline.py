@@ -202,7 +202,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    SANDBOX_DIR = setup_sandbox()
+    SANDBOX_DIR = setup_sandbox(provider=args.provider, mode="baseline")
     print("-" * 60)
 
     baseline(

@@ -24,7 +24,7 @@ This should take multiple iterations — get the core logic working first, then 
 """
 
 # Fork upstream and clone with push access
-SANDBOX_DIR = setup_sandbox()
+SANDBOX_DIR = setup_sandbox(provider=args.provider, mode="feedback")
 print("-" * 60)
 
 loop(TASK, provider=args.provider, model=args.model,
