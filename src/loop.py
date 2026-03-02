@@ -1,5 +1,6 @@
 """Main loop orchestrator."""
 
+from datetime import datetime
 from pathlib import Path
 
 from src.log import Logger
@@ -20,7 +21,6 @@ def loop(
     prompt: str,
     provider: str = "claude",
     model: str | None = None,
-    timeout: int = 900,
     max_wait: int = 3600,
     workspace: str | None = None,
     rate_check_interval: float = 60.0,
@@ -35,6 +35,18 @@ def loop(
     session_id = None
     iteration = 0
 
+    # Pretty markdown output file for human reading
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    output_path = log_dir / f"ralph_{stamp}.md"
+    output_file = open(output_path, "w")
+    output_file.write(f"# RALPH Run — {stamp}\n\n")
+    output_file.write(f"**Task:** {prompt.strip()}\n\n")
+    output_file.write(f"**Provider:** {provider} | **Model:** {model or 'default'}\n\n")
+    output_file.write(f"---\n\n")
+    output_file.flush()
+
     monitor = RateMonitor(
         provider=provider,
         check_interval=rate_check_interval,
@@ -43,9 +55,10 @@ def loop(
     )
     monitor.start()
 
-    print(f"provider={provider} timeout={timeout}s max_wait={max_wait}s")
+    print(f"provider={provider} max_wait={max_wait}s")
     print(f"workspace: {ws_str}")
-    print(f"log: {logger.path}")
+    print(f"output: {output_path}")
+    print(f"log:    {logger.path}")
     print("-" * 60)
 
     try:
@@ -73,46 +86,53 @@ def loop(
 
             cmd = build_cmd(provider, current_prompt, model=model)
 
-            print(f"\n>> iteration {iteration}" + (f" (session: {session_id[:20]}...)" if session_id else ""))
+            iter_start = datetime.now()
+            print(f"[{iter_start.strftime('%H:%M:%S')}] iteration {iteration} ...", end="", flush=True)
             logger.iteration_start(iteration, cmd)
 
-            raw_output, exit_code, elapsed = run_once(cmd, timeout, cwd=ws_str, log_file=logger.file,
-                                                        cancel_event=monitor.cancel_event)
+            raw_output, exit_code, elapsed = run_once(cmd, cwd=ws_str, log_file=logger.file,
+                                                        cancel_event=monitor.cancel_event, quiet=True)
             logger.iteration_output("", exit_code, elapsed)  # output already streamed to log
-
-            print(f"\n  exit={exit_code} time={elapsed:.0f}s")
 
             # --- detection (order matters) ---
             event = "ok"
 
             if exit_code == 125:
                 event = "rate_cancelled"
-                print("  ** cancelled by rate monitor -- waiting for usage to drop")
+                print(f" rate-limited ({elapsed:.0f}s)")
                 logger.event("cancelled by rate monitor")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
+                output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [rate-limited]\n\n---\n\n")
+                output_file.flush()
                 monitor.wait_if_needed()
                 continue
 
             if exit_code == 124:
                 event = "timeout"
-                print("  ** timed out -- retrying")
+                print(f" timeout ({elapsed:.0f}s)")
                 logger.event("timeout -- retrying")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
+                output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [timeout]\n\n---\n\n")
+                output_file.flush()
                 continue
 
             display_text = get_display_text(provider, raw_output)
             if detect_asking_input(display_text):
                 event = "asked_input"
-                print("  ** model asked for input -- retrying")
+                print(f" asked input ({elapsed:.0f}s)")
                 logger.event("model asked for input -- retrying")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
+                output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [asked input]\n\n---\n\n")
+                output_file.flush()
                 continue
 
             if exit_code != 0:
                 event = "error"
-                print(f"  ** exit code {exit_code} -- retrying")
+                print(f" error exit={exit_code} ({elapsed:.0f}s)")
                 logger.event(f"exit code {exit_code} -- retrying")
                 write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
+                output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [error exit={exit_code}]\n\n---\n\n")
+                output_file.flush()
                 continue
 
             # Success — extract session ID for logging
@@ -125,24 +145,35 @@ def loop(
                 if new_sid:
                     session_id = new_sid
 
-            print("  ok")
+            print(f" ok ({elapsed:.0f}s)")
             logger.event("iteration ok")
 
+            # Print a short preview of Claude's response
+            preview = display_text.strip().replace("\n", " ")
+            if len(preview) > 120:
+                preview = preview[:120] + "..."
+            print(f"  >> {preview}")
+
             write_status(ws_str, iteration, event, exit_code, elapsed, session_id, raw_output)
+
+            # Write worker output to markdown
+            output_file.write(f"## Iteration {iteration} — {iter_start.strftime('%H:%M:%S')} ({elapsed:.0f}s) [ok]\n\n")
+            output_file.write("### Worker Output\n\n")
+            output_file.write(display_text.strip() + "\n\n")
 
             # Find the progress file the worker just wrote
             progress_path = find_latest_checkpoint(ws_str, "progress")
             if progress_path:
-                print(f"  progress file: {progress_path.name}")
+                print(f"  progress: {progress_path.name}")
                 progress_content = progress_path.read_text()
             else:
-                print("  warning: no progress file found in checkpoints/")
+                print("  warning: no progress file found")
                 progress_content = ""
 
             # Gather feedback history and run feedback agent
             feedback_history = read_all_feedback(ws_str)
 
-            print("  running feedback agent (Claude Code)...")
+            print("  running feedback agent ...", end="", flush=True)
             logger.event("running feedback agent (Claude Code)")
             feedback_path = run_feedback_agent_cc(
                 ws_str,
@@ -152,15 +183,23 @@ def loop(
             )
 
             if feedback_path:
-                print(f"  feedback written to: {feedback_path.name}")
+                feedback_text = feedback_path.read_text()
+                print(f" done ({feedback_path.name})")
                 logger.event(f"feedback written to: {feedback_path}")
+                output_file.write("### Feedback\n\n")
+                output_file.write(feedback_text.strip() + "\n\n")
             else:
-                print("  no feedback file produced")
+                print(" no feedback produced")
                 logger.event("no feedback file from agent")
+
+            output_file.write("---\n\n")
+            output_file.flush()
 
     except KeyboardInterrupt:
         print(f"\n\nStopped after {iteration} iterations.")
         logger.event(f"stopped by user after {iteration} iterations")
     finally:
+        output_file.close()
         monitor.stop()
         logger.close()
+        print(f"output: {output_path}")

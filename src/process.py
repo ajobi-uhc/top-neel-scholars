@@ -32,14 +32,16 @@ def build_cmd(provider: str, prompt: str, model: str | None = None) -> list[str]
         raise ValueError(f"Unknown provider: {provider}")
 
 
-def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None,
-             cancel_event=None) -> tuple[str, int, float]:
+def run_once(cmd: list[str], timeout: int | None = None, cwd: str | None = None, log_file=None,
+             cancel_event=None, quiet: bool = False) -> tuple[str, int, float]:
     """Run a single iteration with live terminal output.
 
     Child runs in its own session so ctrl+c only hits the parent.
     Parent catches KeyboardInterrupt and SIGKILLs the child.
     Returns (output, exit_code, elapsed).
     exit_code 124 = timed out, 125 = cancelled by rate monitor.
+    If quiet=True, suppress terminal output (still captures and logs).
+    If timeout=None, run indefinitely (no timeout).
     """
     start = time.time()
     output_lines = []
@@ -71,8 +73,9 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
     # interruptible by KeyboardInterrupt (Ctrl+C).
     def _reader():
         for line in proc.stdout:
-            sys.stdout.write(f"  {line}")
-            sys.stdout.flush()
+            if not quiet:
+                sys.stdout.write(f"  {line}")
+                sys.stdout.flush()
             if log_file:
                 log_file.write(line)
                 log_file.flush()
@@ -82,16 +85,19 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
     reader.start()
 
     try:
-        deadline = start + timeout
+        deadline = start + timeout if timeout else None
         while reader.is_alive():
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                proc.wait()
-                reader.join(timeout=5)
-                elapsed = time.time() - start
-                return "".join(output_lines), 124, elapsed
-            reader.join(timeout=min(0.5, remaining))
+            if deadline:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    proc.wait()
+                    reader.join(timeout=5)
+                    elapsed = time.time() - start
+                    return "".join(output_lines), 124, elapsed
+                reader.join(timeout=min(0.5, remaining))
+            else:
+                reader.join(timeout=0.5)
 
         proc.wait(timeout=10)
         elapsed = time.time() - start
