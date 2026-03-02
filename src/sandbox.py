@@ -110,13 +110,19 @@ def setup_sandbox(
         f"/{gh_user}/{repo_name}.git"
     )
 
-    git("init")
+    git("init", "-b", "main")
     git("config", "user.name", gh_user)
     git("config", "user.email", f"{gh_user}@users.noreply.github.com")
     git("remote", "add", "origin", push_url)
     git("add", ".")
     git("commit", "-m", "Initial commit from top-scholar-sandbox")
     git("push", "-u", "origin", "main")
+
+    # Copy .env into sandbox so the agent has access to API keys (e.g. OPENROUTER_API_KEY)
+    if not _ENV_FILE.exists():
+        raise FileNotFoundError(f".env file not found at {_ENV_FILE}")
+    shutil.copy2(_ENV_FILE, sandbox / ".env")
+    print(f"  .env copied into sandbox")
 
     print(f"Sandbox ready: {sandbox}")
     print(f"  repo → {gh_user}/{repo_name}")
