@@ -12,7 +12,7 @@ from src.parse import (
 )
 from src.process import build_cmd, run_once
 from src.rate_monitor import RateMonitor
-from src.status import find_latest_checkpoint, read_all_feedback, run_feedback_agent_cc, write_status
+from src.status import find_latest_checkpoint, init_feedback_agent, run_feedback_agent_cc, write_status
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -61,28 +61,35 @@ def loop(
     print(f"log:    {logger.path}")
     print("-" * 60)
 
+    # Initialize persistent feedback agent session
+    print("Initializing feedback agent ...", end="", flush=True)
+    feedback_session_id = init_feedback_agent(ws_str)
+    if feedback_session_id:
+        print(f" ok (session: {feedback_session_id[:20]}...)")
+    else:
+        print(" failed (will retry as one-shot)")
+    logger.event(f"feedback agent init: session={feedback_session_id}")
+
     try:
         while True:
             iteration += 1
 
             monitor.wait_if_needed()
 
-            # Build prompt: first iteration uses original task, subsequent use template
+            # Build prompt: first iteration uses start_worker.md, subsequent use continue_with_feedback.md
             if iteration == 1:
-                current_prompt = prompt
+                current_prompt = (PROMPTS_DIR / "start_worker.md").read_text()
             else:
-                progress_path = find_latest_checkpoint(ws_str, "progress")
+                finished_path = find_latest_checkpoint(ws_str, "finished")
                 feedback_path = find_latest_checkpoint(ws_str, "feedback")
-                if progress_path and feedback_path:
-                    progress_content = progress_path.read_text()
-                    feedback_content = feedback_path.read_text()
+                if finished_path and feedback_path:
                     template = (PROMPTS_DIR / "continue_with_feedback.md").read_text()
                     current_prompt = (template
-                        .replace("{progress_content}", progress_content)
-                        .replace("{feedback_content}", feedback_content)
-                        .replace("{original_task}", prompt))
+                        .replace("{finished_timestamp}", finished_path.stem.replace("finished_", ""))
+                        .replace("{feedback_timestamp}", feedback_path.stem.replace("feedback_", "")))
                 else:
-                    current_prompt = prompt
+                    # Fallback to start prompt if no checkpoints exist yet
+                    current_prompt = (PROMPTS_DIR / "start_worker.md").read_text()
 
             cmd = build_cmd(provider, current_prompt, model=model)
 
@@ -161,25 +168,20 @@ def loop(
             output_file.write("### Worker Output\n\n")
             output_file.write(display_text.strip() + "\n\n")
 
-            # Find the progress file the worker just wrote
-            progress_path = find_latest_checkpoint(ws_str, "progress")
-            if progress_path:
-                print(f"  progress: {progress_path.name}")
-                progress_content = progress_path.read_text()
+            # Find the finished file the worker just wrote
+            finished_path = find_latest_checkpoint(ws_str, "finished")
+            if finished_path:
+                print(f"  finished: {finished_path.name}")
             else:
-                print("  warning: no progress file found")
-                progress_content = ""
+                print("  warning: no finished file found in memories/")
 
-            # Gather feedback history and run feedback agent
-            feedback_history = read_all_feedback(ws_str)
-
+            # Run feedback agent (persistent session)
             print("  running feedback agent ...", end="", flush=True)
-            logger.event("running feedback agent (Claude Code)")
-            feedback_path = run_feedback_agent_cc(
+            logger.event("running feedback agent")
+            feedback_path, feedback_session_id = run_feedback_agent_cc(
                 ws_str,
-                original_task=prompt,
-                progress_content=progress_content,
-                feedback_history=feedback_history,
+                finished_path=finished_path,
+                feedback_session_id=feedback_session_id,
             )
 
             if feedback_path:
