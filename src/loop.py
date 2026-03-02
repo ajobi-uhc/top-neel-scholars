@@ -76,20 +76,20 @@ def loop(
 
             monitor.wait_if_needed()
 
-            # Build prompt: first iteration uses start_worker.md, subsequent use continue_with_feedback.md
+            # Build prompt: first iteration uses start_worker, subsequent use continue_worker
             if iteration == 1:
-                current_prompt = (PROMPTS_DIR / "start_worker.md").read_text()
+                current_prompt = (PROMPTS_DIR / "feedback" / "start_worker.md").read_text()
             else:
                 finished_path = find_latest_checkpoint(ws_str, "finished")
                 feedback_path = find_latest_checkpoint(ws_str, "feedback")
                 if finished_path and feedback_path:
-                    template = (PROMPTS_DIR / "continue_with_feedback.md").read_text()
+                    template = (PROMPTS_DIR / "feedback" / "continue_worker.md").read_text()
                     current_prompt = (template
                         .replace("{finished_timestamp}", finished_path.stem.replace("finished_", ""))
                         .replace("{feedback_timestamp}", feedback_path.stem.replace("feedback_", "")))
                 else:
                     # Fallback to start prompt if no checkpoints exist yet
-                    current_prompt = (PROMPTS_DIR / "start_worker.md").read_text()
+                    current_prompt = (PROMPTS_DIR / "feedback" / "start_worker.md").read_text()
 
             cmd = build_cmd(provider, current_prompt, model=model)
 

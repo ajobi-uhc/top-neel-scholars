@@ -128,7 +128,7 @@ def init_feedback_agent(workspace: str, timeout: int = 120) -> str | None:
     Runs the init prompt and returns the session ID for future --resume calls.
     Returns None on failure.
     """
-    init_prompt = (PROMPTS_DIR / "feedback_agent_init.md").read_text()
+    init_prompt = (PROMPTS_DIR / "feedback" / "feedback_init.md").read_text()
 
     cmd = [
         "claude",
@@ -163,7 +163,7 @@ def run_feedback_agent_cc(
         return None, feedback_session_id
 
     timestamp = finished_path.stem.replace("finished_", "")
-    template = (PROMPTS_DIR / "feedback_agent_preamble.md").read_text()
+    template = (PROMPTS_DIR / "feedback" / "feedback_continue.md").read_text()
     prompt = template.replace("{timestamp}", timestamp)
 
     cmd = [

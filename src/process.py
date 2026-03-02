@@ -6,15 +6,7 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
-
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-
-
 def build_cmd(provider: str, prompt: str, model: str | None = None) -> list[str]:
-    preamble = (PROMPTS_DIR / "worker_preamble.md").read_text()
-    full_prompt = preamble + "\n" + prompt
-
     if provider == "claude":
         cmd = [
             "claude",
@@ -24,10 +16,10 @@ def build_cmd(provider: str, prompt: str, model: str | None = None) -> list[str]
         ]
         if model:
             cmd += ["--model", model]
-        cmd += ["-p", full_prompt]
+        cmd += ["-p", prompt]
         return cmd
     elif provider == "codex":
-        return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", full_prompt]
+        return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", prompt]
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
