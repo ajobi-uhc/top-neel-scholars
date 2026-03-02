@@ -6,4 +6,5 @@ dist/
 build/
 .env
 workspace/
+sandbox/
 logs/

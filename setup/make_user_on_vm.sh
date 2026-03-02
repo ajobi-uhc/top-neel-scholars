@@ -3,11 +3,18 @@ if [ -z "$USERNAME" ]; then
   echo "Usage: $0 <username>"
   exit 1
 fi
-useradd -m -s /bin/bash $USERNAME
-echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
-chmod 440 /etc/sudoers.d/$USERNAME
-mkdir -p /home/$USERNAME/.ssh
-cp /root/.ssh/authorized_keys /home/$USERNAME/.ssh/
-chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh
-chmod 700 /home/$USERNAME/.ssh
-chmod 600 /home/$USERNAME/.ssh/authorized_keys
+useradd -m -s /bin/bash "$USERNAME"
+echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/"$USERNAME"
+chmod 440 /etc/sudoers.d/"$USERNAME"
+mkdir -p /home/"$USERNAME"/.ssh
+cp /root/.ssh/authorized_keys /home/"$USERNAME"/.ssh/
+chown -R "$USERNAME":"$USERNAME" /home/"$USERNAME"/.ssh
+chmod 700 /home/"$USERNAME"/.ssh
+chmod 600 /home/"$USERNAME"/.ssh/authorized_keys
+
+# Give user write access to the workspace
+chmod -R a+w /workspace
+
+# Make claude CLI available globally
+cp /root/.local/bin/claude /usr/local/bin/claude 2>/dev/null || true
+chmod +x /usr/local/bin/claude 2>/dev/null || true

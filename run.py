@@ -1,12 +1,7 @@
 import argparse
-import shutil
-import subprocess
-from pathlib import Path
 
 from src import loop
-
-SANDBOX_REPO = "https://github.com/divanoval/top-scholar-sandbox.git"
-SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
+from src.sandbox import setup_sandbox
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--provider", choices=["claude", "codex"], default="claude")
@@ -28,12 +23,8 @@ Build a small Python CLI tool in src/wordfreq.py that:
 This should take multiple iterations — get the core logic working first, then tests, then polish.
 """
 
-# Clone sandbox repo fresh each run
-print(f"Cloning {SANDBOX_REPO} ...")
-if SANDBOX_DIR.exists():
-    shutil.rmtree(SANDBOX_DIR)
-subprocess.run(["git", "clone", SANDBOX_REPO, str(SANDBOX_DIR)], check=True)
-print(f"Cloned to {SANDBOX_DIR}")
+# Fork upstream and clone with push access
+SANDBOX_DIR = setup_sandbox()
 print("-" * 60)
 
 loop(TASK, provider=args.provider, model=args.model,
