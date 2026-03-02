@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # tmux dashboard for monitoring the looper agent
-# Usage: ./monitor.sh [session-name]
+# Usage: ./monitor.sh [session-name] [workspace-path]
 #   Launches a 4-pane tmux layout. Run "tmux attach -t <session>" if detached.
+#   workspace-path defaults to ~/sandbox
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SESSION="${1:-looper-monitor}"
+WORKSPACE="${2:-$HOME/sandbox}"
 PANE_DIR="$ROOT/monitor"
 
 # Kill existing session if any
@@ -22,9 +24,9 @@ tmux set-option -t "$SESSION" pane-border-style "fg=colour240"
 tmux set-option -t "$SESSION" pane-active-border-style "fg=colour136"
 
 # Split into 4 panes (avoid -p flag; broken in detached tmux 3.4)
-tmux split-window -t "$SESSION"   -h "bash $PANE_DIR/pane_status.sh"
-tmux split-window -t "$SESSION.0" -v "bash $PANE_DIR/pane_timeline.sh"
-tmux split-window -t "$SESSION.2" -v "bash $PANE_DIR/pane_files.sh"
+tmux split-window -t "$SESSION"   -h "bash $PANE_DIR/pane_status.sh $WORKSPACE"
+tmux split-window -t "$SESSION.0" -v "bash $PANE_DIR/pane_timeline.sh $WORKSPACE"
+tmux split-window -t "$SESSION.2" -v "bash $PANE_DIR/pane_files.sh $WORKSPACE"
 
 # Even 2x2 grid
 tmux select-layout -t "$SESSION" tiled

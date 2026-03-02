@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Pane: tail -f a status log (no refresh/flicker)
 cd "$(dirname "$0")/.."
-STATUS_DIR="./workspace/status"
+WORKSPACE="${1:-$HOME/sandbox}"
+STATUS_DIR="$WORKSPACE/status"
 LOGFILE="$STATUS_DIR/_status.log"
 
 mkdir -p "$STATUS_DIR"
+trap 'kill $(jobs -p) 2>/dev/null' EXIT
 
 # Helper to format a status JSON file
 format_json() {
@@ -30,7 +32,7 @@ if tail:
 
 # Reset and seed with all existing status files (oldest first)
 : > "$LOGFILE"
-for f in $(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | tac); do
+for f in $(ls "$STATUS_DIR"/status_*.json 2>/dev/null | sort); do
     {
         # Find matching .md (same timestamp suffix)
         base=$(basename "$f" .json)
@@ -48,11 +50,11 @@ done
 
 # Background: watch for new status files and append to the log
 (
-    LAST_JSON=$(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | head -1)
-    LAST_MD=$(ls -t "$STATUS_DIR"/status_*.md 2>/dev/null | head -1)
+    LAST_JSON=$(ls "$STATUS_DIR"/status_*.json 2>/dev/null | sort | tail -1)
+    LAST_MD=$(ls "$STATUS_DIR"/status_*.md 2>/dev/null | sort | tail -1)
     while true; do
-        md=$(ls -t "$STATUS_DIR"/status_*.md 2>/dev/null | head -1)
-        json=$(ls -t "$STATUS_DIR"/status_*.json 2>/dev/null | head -1)
+        md=$(ls "$STATUS_DIR"/status_*.md 2>/dev/null | sort | tail -1)
+        json=$(ls "$STATUS_DIR"/status_*.json 2>/dev/null | sort | tail -1)
 
         if [ -n "$md" ] && [ "$md" != "$LAST_MD" ]; then
             {
