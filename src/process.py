@@ -46,6 +46,7 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
 
     proc = subprocess.Popen(
         cmd,
+        stdin=subprocess.DEVNULL,  # prevent child from modifying terminal settings
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -102,6 +103,9 @@ def run_once(cmd: list[str], timeout: int, cwd: str | None = None, log_file=None
         return "".join(output_lines), proc.returncode, elapsed
 
     except KeyboardInterrupt:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
         proc.wait()
         raise

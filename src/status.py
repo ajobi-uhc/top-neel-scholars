@@ -5,8 +5,11 @@ spawns a Claude Code subprocess as the feedback agent.
 """
 
 import json
+import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -97,6 +100,7 @@ def run_feedback_agent_cc(
     try:
         proc = subprocess.Popen(
             cmd,
+            stdin=subprocess.DEVNULL,  # prevent child from modifying terminal settings
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -104,24 +108,38 @@ def run_feedback_agent_cc(
             start_new_session=True,
         )
 
-        # Stream output live
-        for line in proc.stdout:
-            sys.stdout.write(f"  [feedback] {line}")
-            sys.stdout.flush()
+        # Read stdout in a background thread so the main thread stays
+        # interruptible by KeyboardInterrupt (Ctrl+C).
+        def _reader():
+            for line in proc.stdout:
+                sys.stdout.write(f"  [feedback] {line}")
+                sys.stdout.flush()
 
-        proc.wait(timeout=max(1, timeout - int(time.time() - start)))
+        reader = threading.Thread(target=_reader, daemon=True)
+        reader.start()
+
+        deadline = start + timeout
+        while reader.is_alive():
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.wait()
+                reader.join(timeout=5)
+                print("  feedback agent timed out")
+                return None
+            reader.join(timeout=min(0.5, remaining))
+
+        proc.wait(timeout=10)
 
         if proc.returncode != 0:
             print(f"  feedback agent exited with code {proc.returncode}")
             return None
 
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        print("  feedback agent timed out")
-        return None
     except KeyboardInterrupt:
-        proc.kill()
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
         proc.wait()
         raise
 
