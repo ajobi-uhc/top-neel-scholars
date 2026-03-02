@@ -21,7 +21,6 @@ def loop(
     prompt: str,
     provider: str = "claude",
     model: str | None = None,
-    timeout: int = 900,
     max_wait: int = 3600,
     workspace: str | None = None,
     rate_check_interval: float = 60.0,
@@ -56,7 +55,7 @@ def loop(
     )
     monitor.start()
 
-    print(f"provider={provider} timeout={timeout}s max_wait={max_wait}s")
+    print(f"provider={provider} max_wait={max_wait}s")
     print(f"workspace: {ws_str}")
     print(f"output: {output_path}")
     print(f"log:    {logger.path}")
@@ -91,7 +90,7 @@ def loop(
             print(f"[{iter_start.strftime('%H:%M:%S')}] iteration {iteration} ...", end="", flush=True)
             logger.iteration_start(iteration, cmd)
 
-            raw_output, exit_code, elapsed = run_once(cmd, timeout, cwd=ws_str, log_file=logger.file,
+            raw_output, exit_code, elapsed = run_once(cmd, cwd=ws_str, log_file=logger.file,
                                                         cancel_event=monitor.cancel_event, quiet=True)
             logger.iteration_output("", exit_code, elapsed)  # output already streamed to log
 

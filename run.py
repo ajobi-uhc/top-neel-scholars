@@ -37,5 +37,5 @@ print(f"Cloned to {SANDBOX_DIR}")
 print("-" * 60)
 
 loop(TASK, provider=args.provider, model=args.model,
-     timeout=120, rate_threshold=args.rate_threshold,
+     rate_threshold=args.rate_threshold,
      workspace=str(SANDBOX_DIR))
