@@ -14,7 +14,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from src.parse import extract_session_id
+from src.parse import extract_result_text, extract_session_id
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -122,7 +122,7 @@ def _run_claude_cmd(cmd: list[str], workspace: str, timeout: int,
         raise
 
 
-def init_feedback_agent(workspace: str, timeout: int = 120) -> str | None:
+def init_feedback_agent(workspace: str, timeout: int = 300) -> str | None:
     """Initialize the persistent feedback agent session.
 
     Runs the init prompt and returns the session ID for future --resume calls.
@@ -151,7 +151,7 @@ def run_feedback_agent_cc(
     workspace: str,
     finished_path: Path | None,
     feedback_session_id: str | None,
-    timeout: int = 120,
+    timeout: int = 600,
 ) -> tuple[Path | None, str | None]:
     """Send a feedback prompt to the persistent feedback agent.
 
@@ -175,19 +175,37 @@ def run_feedback_agent_cc(
         cmd += ["--resume", feedback_session_id]
     cmd += ["-p", prompt]
 
+    start_t = time.time()
     raw_output, exit_code = _run_claude_cmd(cmd, workspace, timeout)
+    elapsed = time.time() - start_t
 
     if exit_code == 124:
-        print("  feedback agent timed out")
+        print(f"  feedback agent timed out after {elapsed:.0f}s (limit={timeout}s)")
         return None, feedback_session_id
 
     if exit_code != 0:
-        print(f"  feedback agent exited with code {exit_code}")
+        print(f"  feedback agent exited with code {exit_code} after {elapsed:.0f}s")
+        # Dump first 500 chars for debugging
+        if raw_output:
+            print(f"  [debug] output preview: {raw_output[:500]}")
         return None, feedback_session_id
+
+    print(f" completed in {elapsed:.0f}s (exit=0, output={len(raw_output)} bytes)")
 
     # Update session ID from output (in case it changed)
     new_sid = extract_session_id(raw_output)
     if new_sid:
         feedback_session_id = new_sid
 
-    return find_latest_checkpoint(workspace, "feedback"), feedback_session_id
+    # Write feedback file from the agent's output directly,
+    # rather than relying on the agent to write it via tool use.
+    feedback_text = extract_result_text(raw_output).strip()
+    if not feedback_text:
+        print(f"  [debug] extract_result_text returned empty. raw_output[:300]: {raw_output[:300]}")
+        return find_latest_checkpoint(workspace, "feedback"), feedback_session_id
+
+    mem_dir = Path(workspace) / "memories"
+    mem_dir.mkdir(parents=True, exist_ok=True)
+    feedback_path = mem_dir / f"feedback_{timestamp}.md"
+    feedback_path.write_text(feedback_text)
+    return feedback_path, feedback_session_id

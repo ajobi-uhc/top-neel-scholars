@@ -28,7 +28,7 @@ Focus heavily on expanding the project's ambition and insight, not just fixing s
 
 ## Output
 
-You must produce a file named `memories/feedback_{timestamp}.md`, which contains all of the above. The timestamp must exactly match the timestamp of the input file.
+Your response will be automatically saved as the feedback file. Do not write the file yourself.
 
 Structure your feedback as:
 
